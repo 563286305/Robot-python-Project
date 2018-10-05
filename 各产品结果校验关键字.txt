@@ -1,0 +1,2245 @@
+*** Settings ***
+Library           Collections
+Library           RequestsLibrary
+Library           DatabaseLibrary
+Library           SudsLibrary
+Library           Selenium2Library
+Library           DateTime
+Library           MyLibrary/FtpUpDown.py
+
+*** Keywords ***
+调用接口方法
+    [Arguments]    ${head}    ${body}    ${ExcelFile}    ${ExcelSheet}    ${Row}    ${Column}
+    ${res}    Call Soap Method    recordLoan    ${head}    ${body}
+    ${restransHead}    get from dictionary    ${res}    transHead
+    ${retCode}    get from dictionary    ${restransHead}    retCode
+    ${retMsg}    get from dictionary    ${restransHead}    retMsg
+    ${resappId}    Run Keyword If    ${retCode}==000000    获取appId    ${res}
+    addExcel    ${ExcelFile}    ${ExcelSheet}    ${Row}    ${Column}    ${resappId}
+    [Return]    ${retCode}    ${retMsg}    ${resappId}
+
+获取appId
+    [Arguments]    ${res}
+    ${restransBody}    get from dictionary    ${res}    transBody
+    ${resentity}    get from dictionary    ${restransBody}    entity
+    ${resappId}    set variable    ${resentity[0][0]}
+    [Return]    ${resappId}
+
+返回码校验
+    [Arguments]    ${ExcelFile}    ${ExcelSheet}    ${i}    ${retCode}
+    addExcel    ${ExcelFile}    ${ExcelSheet}    ${i+2}    13    ${retCode}
+    ${preCode}    readExcel    ${ExcelFile}    ${ExcelSheet}    ${i+2}    11
+    ${retCode1}    readExcel    ${ExcelFile}    ${ExcelSheet}    ${i+2}    13
+    ${resultCode}    Run Keyword And Continue On Failure    Run Keyword If    ${preCode}==${retCode1}    Set Variable    PASS
+    ...    ELSE    Set Variable    FAIL
+    addExcelwithFormat    ${ExcelFile}    ${ExcelSheet}    ${i+2}    8    ${resultCode}
+
+返回msg校验
+    [Arguments]    ${ExcelFile}    ${ExcelSheet}    ${i}    ${retMsg}
+    addExcel    ${ExcelFile}    ${ExcelSheet}    ${i+2}    14    ${retMsg}
+    ${preMsg}    readExcel    ${ExcelFile}    ${ExcelSheet}    ${i+2}    12
+    ${retMsg1}    readExcel    ${ExcelFile}    ${ExcelSheet}    ${i+2}    14
+    ${resultMsg}    Run Keyword And Continue On Failure    Run Keyword If    '''${preMsg}'''=='''${retMsg1}'''    Set Variable    PASS
+    ...    ELSE    Set Variable    FAIL
+    addExcelwithFormat    ${ExcelFile}    ${ExcelSheet}    ${i+2}    9    ${resultMsg}
+
+详细结果校验
+    [Arguments]    @{sucessList}
+    ${RowCount}    getExcelRowCount    ${DataExcelFile}    ${ResultDetailSheet}
+    ${ColumnCount}    getExcelColumnCount    ${DataExcelFile}    ${ResultDetailSheet}
+    ${resultCheckList}    Create list
+    ${plus}    set variable    0
+    : FOR    ${i}    IN RANGE    ${RowCount-1}
+    \    ${ResultContents}    rowsReadExcel    ${DataExcelFile}    ${ResultDetailSheet}    ${i+1}
+    \    ${resultCheck}    Run Keyword And Continue On Failure    Run Keyword If    'FAIL' in @{ResultContents}    Set Variable    FAIL
+    \    ...    ELSE    Set Variable    PASS
+    \    Append to list    ${resultCheckList}    ${resultCheck}
+    : FOR    ${SuccessID}    IN    @{sucessList}
+    \    Run Keyword And Continue On Failure    resultAddExcel    ${DataExcelFile}    ${DataExcelSheet}    ${SuccessID}    10
+    \    ...    ${plus}    @{resultCheckList}
+    \    ${plus}    plusPlus    ${plus}
+
+connDB
+    [Arguments]    ${database}    ${user}    ${password}    ${host}    ${port}
+    Connect To Database Using Custom Params    pymysql    database='${database}',user='${user}',password='${password}',host='${host}',port=${port},charset='utf8'
+
+客户姓名_CUSTOMER_NAME
+    [Arguments]    ${APPID}
+    ${a}    query    SELECT customer_name FROM sit_loan_db.t_lon_application WHERE APP_ID='${APPID}'
+    ${b}    Query    SELECT acc_account_name FROM sit_loan_db.t_lon_account WHERE APP_ID='${APPID}' AND ACC_TYPE='B6802' AND TRUSTEE_TYPE IN('B134002','B134001')
+    ${result}    Run Keyword And Continue On Failure    Run Keyword If    '''${a[0][0]}'''=='''${b[0][0]}''' and '''${a[0][0]}'''=='''${b[1][0]}'''    Set Variable    PASS
+    ...    ELSE    Set Variable    FAIL
+    ${c}    Catenate    SEPARATOR=|    ${b[0][0]}    ${b[1][0]}
+    [Return]    ${a[0][0]}    ${c}    ${result}
+
+收款卡号_RECEIVE_BANK_CARD
+    [Arguments]    ${APPID}
+    ${a}    query    SELECT RECEIVE_BANK_CARD FROM sit_loan_db.t_lon_application WHERE APP_ID='${APPID}'
+    ${b}    Query    SELECT ACC_BANK_CARD FROM sit_loan_db.t_lon_account WHERE APP_ID='${APPID}' AND ACC_TYPE='B6802'
+    ${result}    Run Keyword And Continue On Failure    Run Keyword If    '''${a[0][0]}'''=='''${b[0][0]}''' and '''${a[0][0]}'''=='''${b[1][0]}''' and '''${a[0][0]}'''=='''${b[2][0]}'''    Set Variable    PASS
+    ...    ELSE    Set Variable    FAIL
+    ${c}    Catenate    SEPARATOR=|    ${b[0][0]}    ${b[1][0]}    ${b[2][0]}
+    [Return]    ${a[0][0]}    ${c}    ${result}
+
+还款卡号_REPAY_BANK_CARD
+    [Arguments]    ${APPID}
+    ${a}    query    SELECT REPAY_BANK_CARD FROM sit_loan_db.t_lon_application WHERE APP_ID='${APPID}'
+    ${b}    Query    SELECT ACC_BANK_CARD FROM sit_loan_db.t_lon_account WHERE APP_ID='${APPID}' AND ACC_TYPE='B6801'
+    ${result}    Run Keyword And Continue On Failure    Run Keyword If    '''${a[0][0]}'''=='''${b[0][0]}''' and '''${a[0][0]}'''=='''${b[1][0]}'''    Set Variable    PASS
+    ...    ELSE    Set Variable    FAIL
+    ${c}    Catenate    SEPARATOR=|    ${b[0][0]}    ${b[1][0]}
+    [Return]    ${a[0][0]}    ${c}    ${result}
+
+收款卡开户行_RECEIVE_OPEN
+    [Arguments]    ${APPID}
+    ${a}    query    SELECT RECEIVE_OPEN FROM sit_loan_db.t_lon_application WHERE APP_ID='${APPID}'
+    ${b}    Query    SELECT ACC_BANK_NAME FROM sit_loan_db.t_lon_account WHERE APP_ID='${APPID}' AND ACC_TYPE='B6802'
+    ${result}    Run Keyword And Continue On Failure    Run Keyword If    '''${a[0][0]}'''=='''${b[0][0]}''' and '''${a[0][0]}'''=='''${b[1][0]}''' and '''${a[0][0]}'''=='''${b[2][0]}'''    Set Variable    PASS
+    ...    ELSE    Set Variable    FAIL
+    ${c}    Catenate    SEPARATOR=|    ${b[0][0]}    ${b[1][0]}    ${b[2][0]}
+    [Return]    ${a[0][0]}    ${c}    ${result}
+
+还款卡开户行_REPAY_OPEN
+    [Arguments]    ${APPID}
+    ${a}    query    SELECT REPAY_OPEN FROM sit_loan_db.t_lon_application WHERE APP_ID='${APPID}'
+    ${b}    Query    SELECT ACC_BANK_NAME FROM sit_loan_db.t_lon_account WHERE APP_ID='${APPID}' AND ACC_TYPE='B6801'
+    ${result}    Run Keyword And Continue On Failure    Run Keyword If    '''${a[0][0]}'''=='''${b[0][0]}''' and '''${a[0][0]}'''=='''${b[1][0]}'''    Set Variable    PASS
+    ...    ELSE    Set Variable    FAIL
+    ${c}    Catenate    SEPARATOR=|    ${b[0][0]}    ${b[1][0]}
+    [Return]    ${a[0][0]}    ${c}    ${result}
+
+联系人姓名_CONTACT_NAME
+    [Arguments]    ${APPID}    ${ExcelFile}    ${ExcelSheet}    ${cell_row}    ${cell_column}
+    ${a}    readExcel    ${ExcelFile}    ${ExcelSheet}    ${cell_row}    ${cell_column}
+    ${b}    Query    SELECT CONTACT_NAME FROM sit_loan_db.t_lon_contact WHERE APP_ID='${APPID}' AND CONTACT_TYPE='F5002'
+    ${result}    Run Keyword And Continue On Failure    Run Keyword If    '''${a}'''=='''${b[0][0]}'''    Set Variable    PASS
+    ...    ELSE    Set Variable    FAIL
+    [Return]    ${a}    ${b[0][0]}    ${result}
+
+联系人与贷款人关系_CONTACT_RELATION
+    [Arguments]    ${APPID}    ${ExcelFile}    ${ExcelSheet}    ${cell_row}    ${cell_column}
+    ${a}    readExcel    ${ExcelFile}    ${ExcelSheet}    ${cell_row}    ${cell_column}
+    ${b}    Query    SELECT CONTACT_RELATION FROM sit_loan_db.t_lon_contact WHERE APP_ID='${APPID}' AND CONTACT_TYPE='F5002'
+    ${result}    Run Keyword And Continue On Failure    Run Keyword If    '''${a}'''=='''${b[0][0]}'''    Set Variable    PASS
+    ...    ELSE    Set Variable    FAIL
+    [Return]    ${a}    ${b[0][0]}    ${result}
+
+附件名称_ATTACH_NAME
+    [Arguments]    ${APPID}    ${ExcelFile}    ${ExcelSheet}    ${cell_row}    ${cell_column}
+    ${a}    readExcel    ${ExcelFile}    ${ExcelSheet}    ${cell_row}    ${cell_column}
+    ${b}    Query    SELECT ATTACH_NAME FROM sit_loan_db.t_lon_attach WHERE APP_ID='${APPID}'
+    ${result}    Run Keyword And Continue On Failure    Run Keyword If    '''${a}'''=='''${b[0][0]}'''    Set Variable    PASS
+    ...    ELSE    Set Variable    FAIL
+    [Return]    ${a}    ${b[0][0]}    ${result}
+
+附件类型_ATTACH_TYPE
+    [Arguments]    ${APPID}    ${ExcelFile}    ${ExcelSheet}    ${cell_row}    ${cell_column}
+    ${a}    readExcel    ${ExcelFile}    ${ExcelSheet}    ${cell_row}    ${cell_column}
+    ${b}    Query    SELECT ATTACH_TYPE FROM sit_loan_db.t_lon_attach WHERE APP_ID='${APPID}'
+    ${result}    Run Keyword And Continue On Failure    Run Keyword If    '''${a}'''=='''${b[0][0]}'''    Set Variable    PASS
+    ...    ELSE    Set Variable    FAIL
+    [Return]    ${a}    ${b[0][0]}    ${result}
+
+文件编号_FILE_ID
+    [Arguments]    ${APPID}    ${ExcelFile}    ${ExcelSheet}    ${cell_row}    ${cell_column}
+    ${a}    readExcel    ${ExcelFile}    ${ExcelSheet}    ${cell_row}    ${cell_column}
+    ${b}    Query    SELECT FILE_ID FROM sit_loan_db.t_lon_attach WHERE APP_ID='${APPID}'
+    ${result}    Run Keyword And Continue On Failure    Run Keyword If    '''${a}'''=='''${b[0][0]}'''    Set Variable    PASS
+    ...    ELSE    Set Variable    FAIL
+    [Return]    ${a}    ${b[0][0]}    ${result}
+
+文件类型_FILE_TYPE
+    [Arguments]    ${APPID}    ${ExcelFile}    ${ExcelSheet}    ${cell_row}    ${cell_column}
+    ${a}    readExcel    ${ExcelFile}    ${ExcelSheet}    ${cell_row}    ${cell_column}
+    ${b}    Query    SELECT FILE_TYPE FROM sit_loan_db.t_lon_attach WHERE APP_ID='${APPID}'
+    ${result}    Run Keyword And Continue On Failure    Run Keyword If    '''${a}'''=='''${b[0][0]}'''    Set Variable    PASS
+    ...    ELSE    Set Variable    FAIL
+    [Return]    ${a}    ${b[0][0]}    ${result}
+
+信用等级_RISK_GRADE
+    [Arguments]    ${APPID}    ${ExcelFile}    ${ExcelSheet}    ${cell_row}    ${cell_column}
+    ${a}    readExcel    ${ExcelFile}    ${ExcelSheet}    ${cell_row}    ${cell_column}
+    ${b}    Query    SELECT RISK_GRADE FROM sit_loan_db.t_lon_credit_report WHERE APP_ID='${APPID}'
+    ${result}    Run Keyword And Continue On Failure    Run Keyword If    '''${a}'''=='''${b[0][0]}''' and '''${a}'''=='''${b[1][0]}''' and '''${a}'''=='''${b[2][0]}'''    Set Variable    PASS
+    ...    ELSE    Set Variable    FAIL
+    ${c}    Catenate    SEPARATOR=|    ${b[0][0]}    ${b[1][0]}    ${b[2][0]}
+    [Return]    ${a}    ${c}    ${result}
+
+年利率_YEAR_RATE
+    [Arguments]    ${APPID}
+    @{a}    Query    SELECT a.APPROVE_LIMIT,a.PRODUCT_ID,a.PRODUCT_VERSION,a.YEAR_RATE,r.RISK_GRADE FROM sit_loan_db.t_lon_application a LEFT JOIN sit_loan_db.t_lon_credit_report r ON a.app_id=r.APP_ID WHERE a.APP_ID IN(${APPID}) AND r.CREDIT_TYPE='F0210'
+    @{b}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM sit_base_db.t_prd_year_rate WHERE TIMES=@{a[0]}[0] AND PRODUCT_ID=@{a[0]}[1] AND VERSION='@{a[0]}[2]'
+    ${c}    Run Keyword And Continue On Failure    Set Variable If    '''@{a[0]}[4]'''=='A'    @{b[0]}[0]    '''@{a[0]}[4]'''=='B'    @{b[0]}[1]
+    ...    '''@{a[0]}[4]'''=='C'    @{b[0]}[2]    '''@{a[0]}[4]'''=='D'    @{b[0]}[3]    '''@{a[0]}[4]'''=='E'    @{b[0]}[4]
+    ...    '''@{a[0]}[4]'''=='AA'    @{b[0]}[5]    '''@{a[0]}[4]'''=='BB'    @{b[0]}[6]
+    ${d}    Convert To Number    ${c}
+    ${result}    Run Keyword And Continue On Failure    Run Keyword If    '''@{a[0]}[3]'''=='''${d}'''    Set Variable    PASS
+    ...    ELSE    Set Variable    FAIL
+    [Return]    @{a[0]}[3]    ${c}    ${result}
+
+工单状态_APP_STATUS
+    [Arguments]    ${APPID}    ${status}    ${loan_db}
+    ${a}    Query    SELECT APP_STATUS FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'
+    ${result}    Set Variable If    '''${a[0][0]}'''=='''${status}'''    PASS    FAIL
+    [Return]    ${a[0][0]}    ${result}
+
+保障担保表信息
+    [Arguments]    ${APPID}
+    ${a}    Query    SELECT * FROM sit_loan_db.t_lon_collateral_guarantee_company WHERE APP_ID='${APPID}'
+    ${b}    Query    SELECT * FROM sit_base_db.t_prd_collateral_guarantee_company WHERE product_id='${a[0][1]}'
+    ${c}    Catenate    SEPARATOR=|    ${a[0][3]}    ${a[0][4]}    ${a[0][5]}    ${a[0][6]}
+    ...    ${a[0][7]}    ${a[0][8]}
+    ${d}    Catenate    SEPARATOR=|    ${b[0][3]}    ${b[0][4]}    ${b[0][5]}    ${b[0][6]}
+    ...    ${b[0][7]}    ${b[0][8]}
+    ${result}    Run Keyword And Continue On Failure    Run Keyword If    '''${c}'''=='''${d}'''    Set Variable    PASS
+    ...    ELSE    Set Variable    FAIL
+    [Return]    ${c}    ${d}    ${result}
+
+登录
+    [Arguments]    ${username}    ${password}
+    Open Browser    ${LOGIN URL}    ${BROWSER}
+    Sleep    3
+    Maximize Browser Window
+    Clear Element Text    id=username
+    Input Text    id=username    ${username}
+    Clear Element Text    id=password
+    Input Text    id=password    ${password}
+    Click Button    name=btnSubmit
+    Sleep    3
+
+选择菜单
+    [Arguments]    ${menu_level_one}    ${menu_level_two}
+    Select Frame    name=fraLeft
+    Wait Until Page Contains Element    id=${menu_level_one}    10    页面元素没有出现
+    Click Element    id=${menu_level_one}
+    Click Element    id=${menu_level_two}
+    Unselect Frame
+    sleep    7
+
+选择二级菜单
+    [Arguments]    ${menu_level_two}
+    Select Frame    name=fraLeft
+    Click Element    id=${menu_level_two}
+    Unselect Frame
+    sleep    5
+
+退出
+    Select Frame    name=fraTop
+    Click Element    css=.sysexit
+
+关闭浏览器
+    Close Browser
+
+生成合同
+    [Arguments]    ${appId}
+    Create Soap Client    ${ip}/webservice/loanService?wsdl
+    log    ${ip}/webservice/loanService?wsdl
+    ${a}    Create Wsdl Object    ns0:generateContract
+    ${return_xml}    Run Keyword And Continue On Failure    Call Soap Method    generateContract    ${appId}
+    ${dict_xml}    Run Keyword If    '''${return_xml}'''!='''None'''    To Json    ${return_xml}
+    ...    ELSE    No Operation
+    ${return_Code}    Set Variable If    '''${return_xml}'''!='''None'''    ${dict_xml['returnCode']}    500BUG
+    ${return_Msg}    Set Variable If    '''${return_xml}'''!='''None'''    ${dict_xml['returnMsg']}    服务器内部错误
+    [Return]    ${return_Code}    ${return_Msg}
+
+生成合同结果校验
+    [Arguments]    ${base_db}    ${loan_db}    ${ProductID}    ${APPID}
+    ${a}    Query    SELECT TEMPLATE_ID,TEMPLATE_NAME FROM ${base_db}.t_prd_relation_product_contract WHERE PRODUCT_ID='${ProductID}'    #查询基础平台合同配置
+    ${b}    Row Count    SELECT * FROM ${base_db}.t_prd_relation_product_contract WHERE PRODUCT_ID='${ProductID}'
+    ${c}    Query    SELECT CONTRACT_TYPE,CONTRACT_TYPE_NAME,CONTRACT_STATUS FROM ${loan_db}.t_lon_application_contract WHERE APP_ID='${APPID}'    #查询合同信息
+    ${d}    Row Count    SELECT * FROM ${loan_db}.t_lon_application_contract WHERE APP_ID='${APPID}'
+    ${e}    Query    SELECT APP_STATUS,APPROVE_AMT,YEAR_RATE,MONTH_RATE,APPROVE_LIMIT,contract_amt FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'
+    #查询是否有投保合同
+    ${f}    Query    SELECT guara_company_code FROM ${loan_db}.t_mls_loan_safeguard_info WHERE APP_ID='${APPID}'
+    #合同类型拼接
+    ${TEMPLATE_ID}    Set Variable    ${a[0][0]}
+    : FOR    ${i}    IN RANGE    1    ${b}
+    \    ${TEMPLATE_ID}    Catenate    SEPARATOR=|    ${TEMPLATE_ID}    ${a[${i}][0]}
+    ${TEMPLATE_ID}    Run Keyword If    '${f[0][0]}'=='TaiPing'    Catenate    SEPARATOR=|    ${TEMPLATE_ID}    134
+    ...    ELSE IF    '${f[0][0]}'=='RenBao'    Catenate    SEPARATOR=|    ${TEMPLATE_ID}    251
+    ...    ELSE    Set Variable    ${TEMPLATE_ID}
+    ${CONTRACT_TYPE}    Set Variable    ${c[0][0]}
+    : FOR    ${j}    IN RANGE    1    ${d}
+    \    ${CONTRACT_TYPE}    Catenate    SEPARATOR=|    ${CONTRACT_TYPE}    ${c[${j}][0]}
+    #拼接基础库的合同name
+    ${TEMPLATE_NAME}    Set Variable    ${a[0][1]}
+    : FOR    ${k}    IN RANGE    1    ${b}
+    \    ${TEMPLATE_NAME}    Catenate    SEPARATOR=|    ${TEMPLATE_NAME}    ${a[${k}][1]}
+    #如果有投保合同，添加投保合同名称
+    ${TEMPLATE_NAME}    Run Keyword If    '${f[0][0]}'=='TaiPing'    Catenate    SEPARATOR=|    ${TEMPLATE_NAME}    投保合同
+    ...    ELSE IF    '${f[0][0]}'=='RenBao'    Catenate    SEPARATOR=|    ${TEMPLATE_NAME}    保险合同（人保）
+    ...    ELSE    Set Variable    ${TEMPLATE_NAME}
+    #拼接合同表的合同name
+    ${CONTRACT_TYPE_NAME}    Set Variable    ${c[0][1]}
+    : FOR    ${m}    IN RANGE    1    ${d}
+    \    ${CONTRACT_TYPE_NAME}    Catenate    SEPARATOR=|    ${CONTRACT_TYPE_NAME}    ${c[${m}][1]}
+    ${b}    Run Keyword If    '${f[0][0]}'=='TaiPing' or '${f[0][0]}'=='RenBao'    Evaluate    ${b}+1
+    ...    ELSE    Set Variable    ${b}
+    #比较
+    ${result1}    Set Variable If    '''${TEMPLATE_ID}'''=='''${CONTRACT_TYPE}'''    PASS    FAIL
+    ${result2}    Set Variable If    '''${TEMPLATE_NAME}'''=='''${CONTRACT_TYPE_NAME}'''    PASS    FAIL
+    ${result3}    Set Variable If    '''${b}'''=='''${d}'''    PASS    FAIL
+    ${result4}    Set Variable If    '''${e[0][0]}'''=='''F0222'''    PASS    FAIL
+    #list组装
+    @{result_list}    Create List    ${CONTRACT_TYPE}    ${TEMPLATE_ID}    ${result1}    ${CONTRACT_TYPE_NAME}    ${TEMPLATE_NAME}
+    ...    ${result2}    ${d}    ${b}    ${result3}    ${e[0][0]}    ${result4}
+    [Return]    @{result_list}
+
+338合同费用校验
+    [Arguments]    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}
+    ${e}    Query    SELECT APP_STATUS,APPROVE_AMT,YEAR_RATE,MONTH_RATE,APPROVE_LIMIT,contract_amt FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查合同生成器入参
+    ${f}    Query    SELECT RISK_GRADE FROM ${loan_db}.t_lon_credit_report WHERE APP_ID='${APPID}' LIMIT 1    #查风险等级
+    ${g}    Query    SELECT FEE_AMT FROM ${loan_db}.t_loan_fee_info WHERE APP_ID='${APPID}' AND FEE_TYPE='B6631'    #查询撮合服务费
+    ${h}    Query    SELECT FEE_AMT FROM ${loan_db}.t_loan_fee_info WHERE APP_ID='${APPID}' AND FEE_TYPE='B6632'    #查询风险评估费
+    ${p}    Query    SELECT FEE_AMT FROM ${loan_db}.t_loan_fee_info WHERE APP_ID='${APPID}' AND FEE_TYPE='B6603'    #查询咨询服务费
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    2    ${e[0][1]}    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    4    2    =${e[0][2]}    #年利率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    6    2    =${e[0][3]}    #月平息
+    addExcel    ${ExcelFile}    ${ExcelSheet}    7    2    ${e[0][4]}    #借款期限
+    addExcel    ${ExcelFile}    ${ExcelSheet}    12    2    ${f[0][0]}    #风险等级
+    Refresh Excel    ${ExcelFile}
+    #读取EXXEl结果
+    ${Contract_amount}    Read Excel    ${ExcelFile}    ${ExcelSheet}    14    2
+    @{service_fee}    cellListReadExcel    ${ExcelFile}    ${ExcelSheet}    K    3    6
+    #转换
+    ${Contract_amount}    Convert To Number    ${Contract_amount}    2
+    ${service_fee0}    Convert To Number    @{service_fee}[0]    2
+    ${service_fee1}    Convert To Number    @{service_fee}[1]    2
+    ${service_fee2}    Convert To Number    @{service_fee}[2]    2
+    #比较
+    ${result5}    Set Variable If    ${Contract_amount}==${e[0][5]}    PASS    FAIL
+    ${result6}    Set Variable If    ${service_fee0}==${g[0][0]}    PASS    FAIL
+    ${result7}    Set Variable If    ${service_fee1}==${h[0][0]}    PASS    FAIL
+    ${result8}    Set Variable If    ${service_fee2}==${p[0][0]}    PASS    FAIL
+    #list组装
+    @{result_list}    Create List    ${Contract_amount}    ${e[0][5]}    ${result5}    ${service_fee0}    ${g[0][0]}
+    ...    ${result6}    ${service_fee1}    ${h[0][0]}    ${result7}    ${service_fee2}    ${p[0][0]}
+    ...    ${result8}
+    [Return]    @{result_list}
+
+245合同费用校验
+    [Arguments]    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}
+    @{a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,LOAN_DATE,CONTRACT_AMT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查合同生成器入参
+    @{b}    Query    SELECT RISK_GRADE FROM ${loan_db}.t_lon_credit_report WHERE APP_ID='${APPID}' AND CREDIT_TYPE='F0206'    #查入参风险等级
+    @{c}    Query    SELECT FEE_AMT FROM ${loan_db}.t_loan_fee_info WHERE APP_ID='${APPID}' ORDER BY FIELD(FEE_TYPE,'B6647','B6631','B6628','B6636','B6635','B6648')    #查费用表
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    2    2    @{a[0]}[0]    #借款金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    2    @{a[0]}[1]    #天数
+    addExcel    ${ExcelFile}    ${ExcelSheet}    6    2    @{b[0]}[0]    #评级
+    Refresh Excel    ${ExcelFile}
+    #读取EXXEl结果
+    ${Contract_amount}    Read Excel    ${ExcelFile}    ${ExcelSheet}    2    5
+    @{service_fee1}    cellListReadExcel    ${ExcelFile}    ${ExcelSheet}    L    18    21
+    @{service_fee2}    cellListReadExcel    ${ExcelFile}    ${ExcelSheet}    K    27    30
+    #转换
+    #比较
+    ${result1}    Set Variable If    ${Contract_amount}==@{a[0]}[3]    PASS    FAIL
+    ${result2}    Set Variable If    @{service_fee1}[0]==@{c[0]}[0]    PASS    FAIL
+    ${result3}    Set Variable If    @{service_fee1}[1]==@{c[1]}[0]    PASS    FAIL
+    ${result4}    Set Variable If    @{service_fee1}[2]==@{c[2]}[0]    PASS    FAIL
+    ${result5}    Set Variable If    @{service_fee2}[0]==@{c[3]}[0]    PASS    FAIL
+    ${result6}    Set Variable If    @{service_fee2}[1]==@{c[4]}[0]    PASS    FAIL
+    ${result7}    Set Variable If    @{service_fee2}[2]==@{c[5]}[0]    PASS    FAIL
+    #结果
+    @{resultA}    Create List    ${Contract_amount}    @{a[0]}[3]    ${result1}    @{service_fee1}[0]    @{c[0]}[0]
+    ...    ${result2}    @{service_fee1}[1]    @{c[1]}[0]    ${result3}    @{service_fee1}[2]    @{c[2]}[0]
+    ...    ${result4}
+    @{result}    Create List    @{resultA}    @{service_fee2}[0]    @{c[3]}[0]    ${result5}    @{service_fee2}[1]
+    ...    @{c[4]}[0]    ${result6}    @{service_fee2}[2]    @{c[5]}[0]    ${result7}
+    [Return]    @{result}
+
+371合同费用校验
+    [Arguments]    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}
+    @{a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,LOAN_DATE,CONTRACT_AMT,ADVISORY_SERVICE_AMT,MONTH_REPAY_LIMIT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{b}    Query    SELECT FEE_TYPE,FEE_AMT,REMARK FROM ${loan_db}.t_loan_fee_info WHERE APP_ID='${APPID}'    #查询费用表
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    2    @{a[0]}[0]    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    4    2    @{a[0]}[1]    #期限
+    addExcel    ${ExcelFile}    ${ExcelSheet}    5    2    =@{a[0]}[2]    #年利率
+    Refresh Excel    ${ExcelFile}
+    #读取EXXEl结果
+    @{service_fee}    cellListReadExcel    ${ExcelFile}    ${ExcelSheet}    B    13    16
+    #比较
+    ${result1}    Set Variable If    @{service_fee}[0]==@{a[0]}[4]    PASS    FAIL
+    ${result2}    Set Variable If    @{service_fee}[1]==@{b[0]}[1]    PASS    FAIL
+    ${result3}    Set Variable If    @{service_fee}[1]==@{a[0]}[5]    PASS    FAIL
+    ${result4}    Set Variable If    @{service_fee}[2]==@{a[0]}[6]    PASS    FAIL
+    #结果
+    @{result}    Create List    @{service_fee}[0]    @{a[0]}[4]    ${result1}    @{service_fee}[1]    @{b[0]}[1]
+    ...    ${result2}    @{service_fee}[1]    @{a[0]}[5]    ${result3}    @{service_fee}[2]    @{a[0]}[6]
+    ...    ${result4}
+    [Return]    @{result}
+
+326合同费用校验
+    [Arguments]    ${base_db}    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,MONTH_RATE,LOAN_DATE,PRODUCT_ID,PRODUCT_VERSION,CONTRACT_AMT,MONTH_REPAY_LIMIT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{b}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_risk_fund WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #查信用管理费费率
+    @{c}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_inst_service_rate WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #查恒元费用比例
+    @{d}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_insurance_rate WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #保险费费率
+    @{e}    Query    SELECT RISK_GRADE FROM ${loan_db}.t_lon_credit_report WHERE APP_ID='${APPID}' LIMIT 1    #查询风险等级
+    @{f}    Query    SELECT FEE_AMT FROM ${loan_db}.t_loan_fee_info WHERE APP_ID='${APPID}' ORDER BY FIELD(FEE_TYPE,'B6631','B6632','B6603','B6647','B6636','B6648','B6635')    #查费用
+    #判断风险等级
+    @{g}    Create List    A    B    C    D    E
+    ...    AA    BB
+    : FOR    ${j}    IN RANGE    7
+    \    Exit For Loop If    '@{g}[${j}]'=='@{e[0]}[0]'
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    2    ${a[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    4    2    ${a[0][1]}    #审批期限
+    addExcel    ${ExcelFile}    ${ExcelSheet}    5    2    =${a[0][2]}    #年利率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    8    2    =@{b[0]}[${j}]    #信用管理费费率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    9    2    =@{c[0]}[${j}]    #恒元费用比例
+    addExcel    ${ExcelFile}    ${ExcelSheet}    10    2    =@{d[0]}[${j}]    #保险费费率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    11    2    =${a[0][3]}    #平息利率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    14    2    @{e[0]}[0]    #风险等级
+    Refresh Excel    ${ExcelFile}
+    #读取EXXEl结果
+    @{amt}    cellListReadExcel    ${ExcelFile}    ${ExcelSheet}    B    17    19
+    @{service_fee1}    cellListReadExcel    ${ExcelFile}    ${ExcelSheet}    J    3    7
+    @{service_fee2}    cellListReadExcel    ${ExcelFile}    ${ExcelSheet}    F    9    11
+    #转换
+    ${fee1}    Convert To Number    @{amt}[0]    2
+    ${fee2}    Convert To Number    @{amt}[1]    2
+    ${fee3}    Convert To Number    @{service_fee1}[0]    2
+    ${fee4}    Convert To Number    @{service_fee1}[1]    2
+    ${fee5}    Convert To Number    @{service_fee1}[2]    2
+    ${fee6}    Convert To Number    @{service_fee1}[3]    2
+    ${fee7}    Convert To Number    @{service_fee2}[0]    2
+    ${fee8}    Convert To Number    @{service_fee2}[1]    2
+    #比较
+    ${result1}    Set Variable If    ${fee1}==${a[0][7]}    PASS    FAIL
+    ${result2}    Set Variable If    ${fee2}==${a[0][8]}    PASS    FAIL
+    ${result3}    Set Variable If    ${fee3}==@{f[0]}[0]    PASS    FAIL
+    ${result4}    Set Variable If    ${fee4}==@{f[1]}[0]    PASS    FAIL
+    ${result5}    Set Variable If    ${fee5}==@{f[2]}[0]    PASS    FAIL
+    ${result6}    Set Variable If    ${fee6}==@{f[3]}[0]    PASS    FAIL
+    ${result7}    Set Variable If    ${fee7}==@{f[4]}[0]    PASS    FAIL
+    ${result8}    Set Variable If    ${fee8}==@{f[5]}[0]    PASS    FAIL
+    #结果
+    @{resultA}    Create List    ${APPID}    ${fee1}    ${a[0][7]}    ${result1}    ${fee2}
+    ...    ${a[0][8]}    ${result2}    ${fee3}    @{f[0]}[0]    ${result3}    ${fee4}
+    ...    @{f[1]}[0]    ${result4}
+    @{result}    Create List    @{resultA}    ${fee5}    @{f[2]}[0]    ${result5}    ${fee6}
+    ...    @{f[3]}[0]    ${result6}    ${fee7}    @{f[4]}[0]    ${result7}    ${fee8}
+    ...    @{f[5]}[0]    ${result8}
+    [Return]    @{result}
+
+342合同费用校验
+    [Arguments]    ${loan_db}    ${APPID}    ${ExcelFile}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,LOAN_DATE,REPAY_DAY,DRAWN_AMT,CONTRACT_AMT,MONTH_REPAY_LIMIT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{b}    Query    SELECT FEE_AMT FROM ${loan_db}.t_loan_fee_info WHERE APP_ID='${APPID}' ORDER BY FIELD(FEE_TYPE,'B6643','B6644','B6603','B6648','B6636','B6635')    #查询费用
+    #写入excel
+    addExcel    ${ExcelFile}    ${a[0][1]}    7    2    ${a[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${a[0][1]}    8    2    @{b[0]}[0]    #机构返点
+    addExcel    ${ExcelFile}    ${a[0][1]}    14    2    =${a[0][2]}    #年利率
+    addExcel    ${ExcelFile}    ${a[0][1]}    17    2    ${a[0][4]}    #还款日
+    Refresh Excel    ${ExcelFile}
+    #读取EXXEl结果
+    @{amt}    Cell List Read Excel    ${ExcelFile}    ${a[0][1]}    B    9    12
+    @{service_fee}    Cell List Read Excel    ${ExcelFile}    ${a[0][1]}    B    22    28
+    #转换
+    ${fee1}    Convert To Number    @{amt}[0]    2
+    ${fee2}    Convert To Number    @{service_fee}[0]    2
+    ${fee3}    Convert To Number    @{service_fee}[1]    2
+    ${fee4}    Convert To Number    @{amt}[2]    2
+    ${fee5}    Convert To Number    @{service_fee}[3]    2
+    ${fee6}    Convert To Number    @{service_fee}[4]    2
+    ${fee7}    Convert To Number    @{service_fee}[5]    2
+    #比较
+    ${result1}    Set Variable If    ${fee1}==${a[0][5]}    PASS    FAIL
+    ${result2}    Set Variable If    ${fee2}==${a[0][6]}    PASS    FAIL
+    ${result3}    Set Variable If    ${fee3}==${a[0][7]}    PASS    FAIL
+    ${result4}    Set Variable If    ${fee4}==@{b[1]}[0]    PASS    FAIL
+    ${result5}    Set Variable If    ${fee5}==@{b[2]}[0]    PASS    FAIL
+    ${result6}    Set Variable If    ${fee6}==@{b[3]}[0]    PASS    FAIL
+    ${result7}    Set Variable If    ${fee7}==@{b[4]}[0]    PASS    FAIL
+    #结果
+    @{resultA}    Create List    ${APPID}    ${fee1}    ${a[0][5]}    ${result1}    ${fee2}
+    ...    ${a[0][6]}    ${result2}    ${fee3}    ${a[0][7]}    ${result3}    ${fee4}
+    ...    @{b[1]}[0]    ${result4}
+    @{result}    Create List    @{resultA}    ${fee5}    @{b[2]}[0]    ${result5}    ${fee6}
+    ...    @{b[3]}[0]    ${result6}    ${fee7}    @{b[4]}[0]    ${result7}
+    [Return]    @{result}
+
+298合同费用校验
+    [Arguments]    ${base_db}    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,MONTH_RATE,LOAN_DATE,PRODUCT_ID,PRODUCT_VERSION,CONTRACT_AMT,MONTH_REPAY_LIMIT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{b}    Query    SELECT INFO_VALUE FROM ${loan_db}.pl_loan_fee_extra_info WHERE APP_ID='${APPID}' AND INFO_NAME IN('riskFundRate','B11404')    #查信用管理费费率
+    @{c}    Query    SELECT INFO_VALUE FROM ${loan_db}.pl_loan_fee_extra_info WHERE APP_ID='${APPID}' AND INFO_NAME IN('serviceRate','B11403')    #咨询服务费率
+    @{d}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_inst_service_rate WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #查恒元费用比例
+    @{e}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_insurance_rate WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #查保险费费率
+    @{g}    Query    SELECT RISK_GRADE FROM ${loan_db}.t_lon_credit_report WHERE APP_ID='${APPID}' LIMIT 1    #查风险等级
+    @{f}    Query    SELECT FEE_AMT FROM ${loan_db}.t_loan_fee_info WHERE APP_ID='${APPID}' ORDER BY FIELD(FEE_TYPE,'B6631','B6632','B6603','B6647','B6636','B6635','B6648','B6640')    #查费用
+    #判断风险等级
+    @{h}    Create List    A    B    C    D    E
+    ...    AA    BB
+    : FOR    ${j}    IN RANGE    7
+    \    Exit For Loop If    '@{h}[${j}]'=='@{g[0]}[0]'
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    2    ${a[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    4    2    ${a[0][1]}    #审批期限
+    addExcel    ${ExcelFile}    ${ExcelSheet}    5    2    =${a[0][2]}    #年利率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    9    2    =@{b[0]}[0]    #信用管理费费率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    10    2    =@{c[0]}[0]    #咨询服务费率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    11    2    =@{d[0]}[${j}]    #恒元费用比例
+    addExcel    ${ExcelFile}    ${ExcelSheet}    12    2    =@{e[0]}[${j}]    #保险费费率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    15    2    @{g[0]}[0]    #风险等级
+    Refresh Excel    ${ExcelFile}
+    #读取EXXEl结果
+    @{amt}    cellListReadExcel    ${ExcelFile}    ${ExcelSheet}    B    17    19
+    @{service_fee1}    cellListReadExcel    ${ExcelFile}    ${ExcelSheet}    J    4    8
+    @{service_fee2}    cellListReadExcel    ${ExcelFile}    ${ExcelSheet}    F    10    13
+    #转换
+    ${fee1}    Convert To Number    @{amt}[0]    2
+    ${fee2}    Convert To Number    @{amt}[1]    2
+    ${fee3}    Convert To Number    @{service_fee1}[0]    2
+    ${fee4}    Convert To Number    @{service_fee1}[1]    2
+    ${fee5}    Convert To Number    @{service_fee1}[2]    2
+    ${fee6}    Convert To Number    @{service_fee1}[3]    2
+    ${fee7}    Convert To Number    @{service_fee2}[0]    2
+    ${fee8}    Convert To Number    @{service_fee2}[1]    2
+    ${fee9}    Convert To Number    @{service_fee2}[2]    2
+    #比较
+    ${result1}    Set Variable If    ${fee1}==${a[0][7]}    PASS    FAIL
+    ${result2}    Set Variable If    ${fee2}==${a[0][8]}    PASS    FAIL
+    ${result3}    Set Variable If    ${fee3}==@{f[0]}[0]    PASS    FAIL
+    ${result4}    Set Variable If    ${fee4}==@{f[1]}[0]    PASS    FAIL
+    ${result5}    Set Variable If    ${fee5}==@{f[2]}[0]    PASS    FAIL
+    ${result6}    Set Variable If    ${fee6}==@{f[3]}[0]    PASS    FAIL
+    ${result7}    Set Variable If    ${fee7}==@{f[4]}[0]    PASS    FAIL
+    ${result8}    Set Variable If    ${fee8}==@{f[5]}[0]    PASS    FAIL
+    ${result9}    Set Variable If    ${fee9}==@{f[6]}[0]    PASS    FAIL
+    #结果
+    @{resultA}    Create List    ${APPID}    ${fee1}    ${a[0][7]}    ${result1}    ${fee2}
+    ...    ${a[0][8]}    ${result2}    ${fee3}    @{f[0]}[0]    ${result3}    ${fee4}
+    ...    @{f[1]}[0]    ${result4}
+    @{result}    Create List    @{resultA}    ${fee5}    @{f[2]}[0]    ${result5}    ${fee6}
+    ...    @{f[3]}[0]    ${result6}    ${fee7}    @{f[4]}[0]    ${result7}    ${fee8}
+    ...    @{f[5]}[0]    ${result8}    ${fee9}    @{f[6]}[0]    ${result9}
+    [Return]    @{result}
+
+235合同费用校验
+    [Arguments]    ${base_db}    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,MONTH_RATE,LOAN_DATE,PRODUCT_ID,PRODUCT_VERSION,CONTRACT_AMT,MONTH_REPAY_LIMIT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{b}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_risk_fund WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #查信用管理费比例
+    @{c}    Query    SELECT RISK_GRADE FROM ${loan_db}.t_lon_credit_report WHERE APP_ID='${APPID}' LIMIT 1    #查风险等级
+    @{d}    Query    SELECT FEE_AMT FROM ${loan_db}.t_loan_fee_info WHERE APP_ID='${APPID}' ORDER BY FIELD(FEE_TYPE,'B6603','B6628','B6636','B6635','B6634')    #查费用
+    #判断风险等级
+    @{h}    Create List    A    B    C    D    E
+    ...    AA    BB
+    : FOR    ${j}    IN RANGE    7
+    \    Exit For Loop If    '@{h}[${j}]'=='@{c[0]}[0]'
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    2    ${a[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    4    2    ${a[0][1]}    #期限
+    addExcel    ${ExcelFile}    ${ExcelSheet}    8    2    =@{b[0]}[${j}]    #信用管理费比例
+    addExcel    ${ExcelFile}    ${ExcelSheet}    5    7    @{c[0]}[0]    #风险等级
+    Refresh Excel    ${ExcelFile}
+    #读取EXXEl结果
+    @{fee}    cellListReadExcel    ${ExcelFile}    ${ExcelSheet}    B    18    25
+    #转换
+    ${fee1}    Convert To Number    @{fee}[0]    2
+    ${fee2}    Convert To Number    @{fee}[2]    2
+    ${fee3}    Convert To Number    @{fee}[4]    2
+    ${fee4}    Convert To Number    @{fee}[5]    2
+    ${fee5}    Convert To Number    @{fee}[6]    2
+    #比较
+    ${result1}    Set Variable If    ${fee1}==${a[0][7]}    PASS    FAIL
+    ${result2}    Set Variable If    ${fee2}==${a[0][8]}    PASS    FAIL
+    ${result3}    Set Variable If    ${fee3}==@{d[0]}[0]    PASS    FAIL
+    ${result4}    Set Variable If    ${fee4}==@{d[1]}[0]    PASS    FAIL
+    ${result5}    Set Variable If    ${fee5}==@{d[2]}[0]    PASS    FAIL
+    #结果
+    @{resultA}    Create List    ${APPID}    ${fee1}    ${a[0][7]}    ${result1}    ${fee2}
+    ...    ${a[0][8]}    ${result2}    ${fee3}    @{d[0]}[0]    ${result3}
+    @{result}    Create List    @{resultA}    ${fee4}    @{d[1]}[0]    ${result4}    ${fee5}
+    ...    @{d[2]}[0]    ${result5}
+    [Return]    @{result}
+
+318合同费用校验
+    [Arguments]    ${base_db}    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,MONTH_RATE,LOAN_DATE,PRODUCT_ID,PRODUCT_VERSION,CONTRACT_AMT,MONTH_REPAY_LIMIT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{b}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_risk_fund WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #风险备用金率
+    @{c}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_quell_base_rate WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #客户平息利率
+    @{d}    Query    SELECT RISK_GRADE FROM ${loan_db}.t_lon_credit_report WHERE APP_ID='${APPID}' LIMIT 1    #查询风险等级
+    @{e}    Query    SELECT FEE_AMT FROM ${loan_db}.t_loan_fee_info WHERE APP_ID='${APPID}' ORDER BY FIELD(FEE_TYPE,'B6603','B6628','B6636','B6648','B6635','B6606')    #查询费用
+    #判断风险等级
+    @{h}    Create List    A    B    C    D    E
+    ...    AA    BB
+    : FOR    ${j}    IN RANGE    7
+    \    Exit For Loop If    '@{h}[${j}]'=='@{d[0]}[0]'
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    2    ${a[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    4    2    ${a[0][1]}    #期限
+    addExcel    ${ExcelFile}    ${ExcelSheet}    8    2    =@{b[0]}[${j}]    #风险备用金率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    12    2    =@{c[0]}[${j}]    #风险备用金率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    15    2    @{d[0]}[0]    #风险等级
+    Refresh Excel    ${ExcelFile}
+    #读取EXXEl结果
+    @{fee}    cellListReadExcel    ${ExcelFile}    ${ExcelSheet}    B    17    25
+    #转换
+    ${fee1}    Convert To Number    @{fee}[0]    2
+    ${fee2}    Convert To Number    @{fee}[1]    2
+    ${fee3}    Convert To Number    @{fee}[3]    2
+    ${fee4}    Convert To Number    @{fee}[4]    2
+    ${fee5}    Convert To Number    @{fee}[5]    2
+    ${fee6}    Convert To Number    @{fee}[6]    2
+    ${fee7}    Convert To Number    @{fee}[7]    2
+    #比较
+    ${result1}    Set Variable If    ${fee1}==${a[0][7]}    PASS    FAIL
+    ${result2}    Set Variable If    ${fee2}==${a[0][8]}    PASS    FAIL
+    ${result3}    Set Variable If    ${fee3}==@{e[0]}[0]    PASS    FAIL
+    ${result4}    Set Variable If    ${fee4}==@{e[1]}[0]    PASS    FAIL
+    ${result5}    Set Variable If    ${fee5}==@{e[2]}[0]    PASS    FAIL
+    ${result6}    Set Variable If    ${fee6}==@{e[3]}[0]    PASS    FAIL
+    ${result7}    Set Variable If    ${fee7}==@{e[4]}[0]    PASS    FAIL
+    #结果
+    @{resultA}    Create List    ${APPID}    ${fee1}    ${a[0][7]}    ${result1}    ${fee2}
+    ...    ${a[0][8]}    ${result2}    ${fee3}    @{e[0]}[0]    ${result3}    ${fee4}
+    ...    @{e[1]}[0]    ${result4}
+    @{result}    Create List    @{resultA}    ${fee5}    @{e[2]}[0]    ${result5}    ${fee6}
+    ...    @{e[3]}[0]    ${result6}    ${fee7}    @{e[4]}[0]    ${result7}
+    [Return]    @{result}
+
+354合同费用校验
+    [Arguments]    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,LOAN_DATE,CONTRACT_AMT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{b}    Query    SELECT FEE_AMT FROM ${loan_db}.t_loan_fee_info WHERE APP_ID='${APPID}' ORDER BY FIELD(FEE_TYPE,'B6603','B6628')    #查询费用
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    2    ${a[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    4    2    ${a[0][1]}    #审批期限
+    Refresh Excel    ${ExcelFile}
+    #读取EXXEl结果
+    @{fee}    cellListReadExcel    ${ExcelFile}    ${ExcelSheet}    B    13    16
+    #转换
+    ${fee1}    Convert To Number    @{fee}[0]    2
+    ${fee2}    Convert To Number    @{fee}[1]    2
+    ${fee3}    Convert To Number    @{fee}[2]    2
+    #比较
+    ${result1}    Set Variable If    ${fee1}==${a[0][4]}    PASS    FAIL
+    ${result2}    Set Variable If    ${fee2}==@{b[0]}[0]    PASS    FAIL
+    ${result3}    Set Variable If    ${fee3}==@{b[1]}[0]    PASS    FAIL
+    #结果
+    @{result}    Create List    ${fee1}    ${a[0][4]}    ${result1}    ${fee2}    @{b[0]}[0]
+    ...    ${result2}    ${fee3}    @{b[1]}[0]    ${result3}
+    [Return]    @{result}
+
+93合同费用校验
+    [Arguments]    ${base_db}    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,MONTH_RATE,LOAN_DATE,PRODUCT_ID,PRODUCT_VERSION,CONTRACT_AMT,MONTH_REPAY_LIMIT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{b}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_risk_fund WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #信用管理费费率
+    @{c}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_insurance_rate WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #保险费费率
+    @{d}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_manager_rate WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #贷后管理费费率
+    @{e}    Query    SELECT RISK_GRADE FROM ${loan_db}.t_lon_credit_report WHERE APP_ID='${APPID}' LIMIT 1    #查询风险等级
+    @{f}    Query    SELECT FEE_AMT FROM ${loan_db}.t_loan_fee_info WHERE APP_ID='${APPID}' ORDER BY FIELD(FEE_TYPE,'B6603','B6647','B6631','B6632','B6636','B6635','B6648','B6629')    #查费用
+    #判断风险等级
+    @{h}    Create List    A    B    C    D    E
+    ...    AA    BB
+    : FOR    ${j}    IN RANGE    7
+    \    Exit For Loop If    '@{h}[${j}]'=='@{e[0]}[0]'
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    2    ${a[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    4    2    ${a[0][1]}    #期限
+    addExcel    ${ExcelFile}    ${ExcelSheet}    5    2    =${a[0][2]}    #年利率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    7    2    =@{b[0]}[${j}]    #信用管理费费率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    8    2    =@{c[0]}[${j}]    #保险费费率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    9    2    =@{d[0]}[${j}]    #贷后管理费费率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    10    2    =${a[0][3]}    #平息利率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    13    2    @{e[0]}[0]    #风险等级
+    Refresh Excel    ${ExcelFile}
+    #读取EXXEl结果
+    @{amt}    cellListReadExcel    ${ExcelFile}    ${ExcelSheet}    B    15    17
+    @{service_fee1}    cellListReadExcel    ${ExcelFile}    ${ExcelSheet}    L    8    12
+    @{service_fee2}    cellListReadExcel    ${ExcelFile}    ${ExcelSheet}    K    16    19
+    #转换
+    ${fee1}    Convert To Number    @{amt}[0]    2
+    ${fee2}    Convert To Number    @{amt}[1]    2
+    ${fee3}    Convert To Number    @{service_fee1}[0]    2
+    ${fee4}    Convert To Number    @{service_fee1}[1]    2
+    ${fee5}    Convert To Number    @{service_fee1}[2]    2
+    ${fee6}    Convert To Number    @{service_fee1}[3]    2
+    ${fee7}    Convert To Number    @{service_fee2}[0]    2
+    ${fee8}    Convert To Number    @{service_fee2}[1]    2
+    ${fee9}    Convert To Number    @{service_fee2}[2]    2
+    #比较
+    ${result1}    Set Variable If    ${fee1}==${a[0][7]}    PASS    FAIL
+    ${result2}    Set Variable If    ${fee2}==${a[0][8]}    PASS    FAIL
+    ${result3}    Set Variable If    ${fee3}==@{f[0]}[0]    PASS    FAIL
+    ${result4}    Set Variable If    ${fee4}==@{f[1]}[0]    PASS    FAIL
+    ${result5}    Set Variable If    ${fee5}==@{f[2]}[0]    PASS    FAIL
+    ${result6}    Set Variable If    ${fee6}==@{f[3]}[0]    PASS    FAIL
+    ${result7}    Set Variable If    ${fee7}==@{f[4]}[0]    PASS    FAIL
+    ${result8}    Set Variable If    ${fee8}==@{f[5]}[0]    PASS    FAIL
+    ${result9}    Set Variable If    ${fee9}==@{f[6]}[0]    PASS    FAIL
+    #结果
+    @{resultA}    Create List    ${APPID}    ${fee1}    ${a[0][7]}    ${result1}    ${fee2}
+    ...    ${a[0][8]}    ${result2}    ${fee3}    @{f[0]}[0]    ${result3}    ${fee4}
+    ...    @{f[1]}[0]    ${result4}
+    @{result}    Create List    @{resultA}    ${fee5}    @{f[2]}[0]    ${result5}    ${fee6}
+    ...    @{f[3]}[0]    ${result6}    ${fee7}    @{f[4]}[0]    ${result7}    ${fee8}
+    ...    @{f[5]}[0]    ${result8}    ${fee9}    @{f[6]}[0]    ${result9}
+    [Return]    @{result}
+
+365合同费用校验
+    [Arguments]    ${base_db}    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,MONTH_RATE,LOAN_DATE,PRODUCT_ID,PRODUCT_VERSION,CONTRACT_AMT,MONTH_REPAY_LIMIT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{b}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_risk_fund WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #信用管理费费率
+    @{c}    Query    SELECT RISK_GRADE FROM ${loan_db}.t_lon_credit_report WHERE APP_ID='${APPID}' LIMIT 1    #查询风险等级
+    @{f}    Query    SELECT FEE_AMT FROM ${loan_db}.t_loan_fee_info WHERE APP_ID='${APPID}' ORDER BY FIELD(FEE_TYPE,'B6648','B6636')    #查费用
+    #判断风险等级
+    @{h}    Create List    A    B    C    D    E
+    ...    AA    BB
+    : FOR    ${j}    IN RANGE    7
+    \    Exit For Loop If    '@{h}[${j}]'=='@{c[0]}[0]'
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    3    ${a[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    4    3    ${a[0][1]}    #期限
+    addExcel    ${ExcelFile}    ${ExcelSheet}    5    9    =@{b[0]}[${j}]    #信用管理费率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    7    3    @{c[0]}[0]    #风险等级
+    Refresh Excel    ${ExcelFile}
+    #读取EXXEl结果
+    @{amt}    cellListReadExcel    ${ExcelFile}    ${ExcelSheet}    F    3    6
+    @{fee}    List Read Excel    ${ExcelFile}    ${ExcelSheet}    15    2    7
+    #转换
+    ${fee1}    Convert To Number    @{amt}[0]    2
+    ${fee2}    Convert To Number    @{fee}[0]    2
+    ${fee3}    Convert To Number    @{fee}[1]    2
+    #比较
+    ${result1}    Set Variable If    ${fee1}==${a[0][7]}    PASS    FAIL
+    ${result2}    Set Variable If    ${fee2}==@{f[0]}[0]    PASS    FAIL
+    ${result3}    Set Variable If    ${fee3}==@{f[1]}[0]    PASS    FAIL
+    #结果
+    @{result}    Create List    ${APPID}    ${fee1}    ${a[0][7]}    ${result1}    ${fee2}
+    ...    @{f[0]}[0]    ${result2}    ${fee3}    @{f[1]}[0]    ${result3}
+    [Return]    @{result}
+
+148合同费用校验
+    [Arguments]    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,MONTH_RATE,LOAN_DATE,PRODUCT_ID,PRODUCT_VERSION,CONTRACT_AMT,MONTH_REPAY_LIMIT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{f}    Query    SELECT FEE_AMT FROM ${loan_db}.t_loan_fee_info WHERE APP_ID='${APPID}' ORDER BY FIELD(FEE_TYPE,'B6603','B6628')    #查费用
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    2    ${a[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    4    2    ${a[0][1]}    #期限
+    addExcel    ${ExcelFile}    ${ExcelSheet}    5    2    =${a[0][3]}    #平息利率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    6    2    =${a[0][2]}    #年利率
+    Refresh Excel    ${ExcelFile}
+    #读取EXXEl结果
+    @{fee}    Cell List Read Excel    ${ExcelFile}    ${ExcelSheet}    B    12    16
+    #转换
+    ${fee1}    Convert To Number    @{fee}[0]    2
+    ${fee2}    Convert To Number    @{fee}[2]    2
+    ${fee3}    Convert To Number    @{fee}[3]    2
+    #比较
+    ${result1}    Set Variable If    ${fee1}==${a[0][7]}    PASS    FAIL
+    ${result2}    Set Variable If    ${fee2}==@{f[0]}[0]    PASS    FAIL
+    ${result3}    Set Variable If    ${fee3}==@{f[1]}[0]    PASS    FAIL
+    #结果
+    @{result}    Create List    ${fee1}    ${a[0][7]}    ${result1}    ${fee2}    @{f[0]}[0]
+    ...    ${result2}    ${fee3}    @{f[1]}[0]    ${result3}
+    [Return]    @{result}
+
+375合同费用校验
+    [Arguments]    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,MONTH_RATE,LOAN_DATE,PRODUCT_ID,PRODUCT_VERSION,CONTRACT_AMT,MONTH_REPAY_LIMIT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{b}    Query    SELECT FEE_AMT FROM ${loan_db}.t_loan_fee_info WHERE APP_ID='${APPID}' ORDER BY FIELD(FEE_TYPE,'B6603','B6628')    #查费用
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    2    2    ${a[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    2    ${a[0][1]}    #期限
+    addExcel    ${ExcelFile}    ${ExcelSheet}    4    2    ${a[0][3]}    #平息利率
+    Refresh Excel    ${ExcelFile}
+    #读取EXXEl结果
+    @{fee}    Cell List Read Excel    ${ExcelFile}    ${ExcelSheet}    B    11    17
+    #转换
+    ${fee1}    Convert To Number    @{fee}[0]    2
+    ${fee2}    Convert To Number    @{fee}[1]    2
+    ${fee3}    Convert To Number    @{fee}[4]    2
+    ${fee4}    Convert To Number    @{fee}[5]    2
+    #比较
+    ${result1}    Set Variable If    ${fee1}==${a[0][7]}    PASS    FAIL
+    ${result2}    Set Variable If    ${fee2}==${a[0][8]}    PASS    FAIL
+    ${result3}    Set Variable If    ${fee3}==@{b[0]}[0]    PASS    FAIL
+    ${result4}    Set Variable If    ${fee4}==@{b[1]}[0]    PASS    FAIL
+    #结果
+    @{resultA}    Create List    ${APPID}    ${fee1}    ${a[0][7]}    ${result1}    ${fee2}
+    ...    ${a[0][8]}    ${result2}
+    @{result}    Create List    @{resultA}    ${fee3}    @{b[0]}[0]    ${result3}    ${fee4}
+    ...    @{b[1]}[0]    ${result4}
+    [Return]    @{result}
+
+277合同费用校验
+    [Arguments]    ${base_db}    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,MONTH_RATE,LOAN_DATE,PRODUCT_ID,PRODUCT_VERSION,CONTRACT_AMT,MONTH_REPAY_LIMIT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{b}    Query    SELECT YEAR_RATE FROM ${base_db}.t_prd_pack_year_rate WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #查询打包价年利率
+    @{c}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_year_rate WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #查询年利率
+    @{d}    Query    SELECT RISK_GRADE FROM ${loan_db}.t_lon_credit_report WHERE APP_ID='${APPID}' LIMIT 1    #查询风险等级
+    @{e}    Query    SELECT FEE_AMT FROM ${loan_db}.t_loan_fee_info WHERE APP_ID='${APPID}' ORDER BY FIELD(FEE_TYPE,'B6603','B6628')    #查询费用
+    #判断风险等级
+    @{h}    Create List    A    B    C    D    E
+    ...    AA    BB
+    : FOR    ${j}    IN RANGE    7
+    \    Exit For Loop If    '@{h}[${j}]'=='@{d[0]}[0]'
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    7    2    ${a[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    8    2    ${a[0][1]}    #期限
+    addExcel    ${ExcelFile}    ${ExcelSheet}    9    2    =@{b[0]}[0]    #打包价年利率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    11    2    =@{c[0]}[${j}]    #合同年利率
+    Refresh Excel    ${ExcelFile}
+    #读取EXXEl结果
+    @{fee}    Cell List Read Excel    ${ExcelFile}    ${ExcelSheet}    B    17    20
+    #转换
+    ${fee1}    Convert To Number    @{fee}[0]    2
+    ${fee2}    Convert To Number    @{fee}[2]    2
+    #比较
+    ${result1}    Set Variable If    ${fee1}==${a[0][7]}    PASS    FAIL
+    ${result2}    Set Variable If    ${fee2}==@{e[0]}[0]    PASS    FAIL
+    #结果
+    @{result}    Create List    ${APPID}    ${fee1}    ${a[0][7]}    ${result1}    ${fee2}
+    ...    @{e[0]}[0]    ${result2}
+    [Return]    @{result}
+
+270合同费用校验
+
+查询放款批次号
+    [Arguments]    ${loan_db}    ${APPID}
+    @{BATCH_SEQ}    Query    SELECT BATCH_SEQ FROM ${loan_db}.t_loan_trans_info WHERE TRANS_TYPE = 'D' AND APP_ID='${APPID}'
+    [Return]    @{BATCH_SEQ[0]}[0]
+
+查看合同
+    [Arguments]    ${appId}
+    Create Soap Client    ${ip}/webservice/loanService?wsdl
+    ${a}    Create Wsdl Object    ns0:seeContract
+    ${return_xml}    Run Keyword And Continue On Failure    Call Soap Method    seeContract    ${appId}
+    ${dict_xml}    Run Keyword If    '''${return_xml}'''!='''None'''    To Json    ${return_xml}
+    ${return_Code}    Set Variable If    '''${return_xml}'''!='''None'''    ${dict_xml['returnCode']}    500BUG
+    ${return_Msg}    Set Variable If    '''${return_xml}'''!='''None'''    ${dict_xml['returnMsg']}    服务器内部错误
+    [Return]    ${return_Code}    ${return_Msg}
+
+电子签章
+    [Arguments]    ${ip}    ${appId}    ${signType}=0
+    ${dicttype}    Create Dictionary    Content-Type=application/json;charset=UTF-8
+    log    ${dicttype}
+    &{head}    Create Dictionary    transType=T    transCode=LS02    transDate=    transTime=    transSerialNo=20150723161316
+    ...    channel=1019    sysCode=1019    secretKey=
+    &{body}    Create Dictionary    appId=${appId}    signType=${signType}
+    &{data}    Create Dictionary    head=&{head}    body=&{body}
+    log    ${data}
+    Create Session    api    ${ip}
+    ${addr}    Post Request    api    /sign/intf/inter/trans!server.intf    data=&{data}    headers=${dicttype}
+    log    ${addr.text}
+    ${sts_code}    Set Variable If    '''${addr.status_code}'''=='''200'''    ${addr.json()['sts']}    api_request_fail
+    ${msg}    Set Variable If    '''${addr.status_code}'''=='''200'''    ${addr.json()['msg']}    error
+    Delete All Sessions
+    [Return]    ${sts_code}    ${msg}
+
+电子签章结果校验
+    [Arguments]    ${loan_db}    ${APPID}
+    ${a}    Query    SELECT PROC_STS,TRANS_STS FROM ${loan_db}.t_loan_trans_info WHERE APP_ID='${APPID}' AND TRANS_TYPE='M'
+    ${app_status}    ${result_app_status}    工单状态_APP_STATUS    ${APPID}    F0230    ${loan_db}
+    ${proc_sts_result}    Set Variable If    '''${a[0][0]}'''=='''WM'''    PASS    FAIL
+    ${trans_sts_result}    Set Variable If    '''${a[0][1]}'''=='''E'''    PASS    FAIL
+    @{result}    Create List    ${app_status}    ${result_app_status}    ${a[0][0]}    ${proc_sts_result}    ${a[0][1]}
+    ...    ${trans_sts_result}
+    [Return]    @{result}
+
+第三方运营审核
+    [Arguments]    ${APPID}    ${productname}
+    Select Frame    id=fraMain
+    Clear Element Text    name=appId
+    Input Text    name=appId    ${APPID}    #输入工单号
+    Click Element    xpath=//*[@id="divSearchList"]/ul/li[5]/label/span/span/a    #点击产品选择下拉框
+    Click Element    xpath=//div[2]//div[text()='${productname}']    #选择产品
+    Click Button    id=btnListQuery    #点击查询
+    Sleep    5
+    Click Button    id=shenAll    #点击全部审核
+    Wait Until Page Contains Element    xpath=/html/body/div[4]/div[2]/div[4]/a[1]    10    页面元素没有出现
+    Click Element    xpath=/html/body/div[4]/div[2]/div[4]/a[1]    #点击确认框中确定按钮
+    Sleep    4
+    ${message}    Get Alert Message
+    Unselect Frame
+    ${result}    Run Keyword And Return Status    Should Contain    ${message}    成功
+    [Return]    ${result}
+
+第三方运营审核新
+    [Arguments]    ${APPID}
+    Select Frame    id=fraMain
+    Clear Element Text    name=appId
+    Input Text    name=appId    ${APPID}    #输入工单号
+    #Click Element    xpath=//*[@id="divSearchList"]/ul/li[5]/label/span/span/a    #点击产品选择下拉框
+    #Click Element    xpath=//div[2]//div[text()='${productname}']    #选择产品
+    Click Button    id=btnListQuery    #点击查询
+    sleep    5
+    Click Button    id=shenAll    #点击全部审核
+    Wait Until Page Contains Element    xpath=/html/body/div[4]/div[2]/div[4]/a[1]    10    页面元素没有出现
+    Click Element    xpath=/html/body/div[4]/div[2]/div[4]/a[1]    #点击确认框中确定按钮
+    sleep    5
+    Wait Until Page Contains Element    xpath=/html/body/div[4]/div[2]/div[4]/a    10    页面元素没有出现
+    Wait Until Page Contains Element    xpath=/html/body/div[4]/div[2]/div[2]    10    页面信息没有出现
+    ${message}    Get Text    xpath=/html/body/div[4]/div[2]/div[2]
+    Click Element    xpath=/html/body/div[4]/div[2]/div[4]/a    #确定
+    Unselect Frame
+    ${result}    Run Keyword And Return Status    Should Contain    ${message}    成功
+    sleep    2
+    [Return]    ${result}
+
+更新工单状态
+    [Arguments]    ${loan_db}    ${APPID}    ${TRUSTEE_TYPE}    ${ACCOUNT_TYPE}
+    Execute Sql String    UPDATE ${loan_db}.t_lon_application SET APP_STATUS='F0240',TRUSTEE_TYPE='${TRUSTEE_TYPE}',ACCOUNT_TYPE='${ACCOUNT_TYPE}' WHERE APP_ID IN('${APPID}')
+
+单笔放款
+    [Arguments]    ${APPID}
+    Select Frame    id=fraMain
+    Clear Element Text    name=appId    #xpath=//*[@id="divSearchList"]/ul[1]/li[2]/input
+    Input Text    name=appId    ${APPID}    #输入工单号
+    Select From List By Value    id=accountType    B8002    #选择账户类型（B8002富友，B8010存管）
+    Click Button    id=btnListQuery    #点击查询
+    sleep    2
+    Click Button    xpath=//*[@id="tblResultOfSglTbl"]/tbody/tr/td[13]/input
+    Select Frame    id=iframe_${APPID}
+    Select Radio Button    check_radio    L    #选择放款选项
+    Click Button    xpath=//*[@id="tblInfo"]/tbody/tr[13]/td/input    #点击提交
+    Wait Until Page Contains Element    xpath=/html/body/div[2]/div[2]/div[4]/a[1]    10    页面元素没有出现
+    Click Element    xpath=/html/body/div[2]/div[2]/div[4]/a[1]    #点击确认
+    Wait Until Page Contains Element    xpath=/html/body/div[2]/div[2]/div[3]/a    10    页面元素没有出现
+    ${message}    Get Text    xpath=/html/body/div[2]/div[2]/div[1]
+    Click Element    xpath=/html/body/div[2]/div[2]/div[3]/a
+    Unselect Frame
+    Select Frame    id=fraMain
+    Click Element    xpath=/html/body/div[2]/div[1]/div[2]/a[2]
+    Unselect Frame
+    ${result}    Run Keyword And Return Status    Should Contain    ${message}    成功
+    [Return]    ${result}
+
+批量放款
+    [Arguments]    ${APPID}    ${ACCOUNT_TYPE}
+    Select Frame    id=fraMain
+    sleep    2
+    Wait Until Page Contains Element    name=appId    10    未找到appid输入框
+    Clear Element Text    name=appId    #xpath=//*[@id="divSearchList"]/ul[1]/li[2]/input
+    Input Text    name=appId    ${APPID}    #输入工单号
+    Select From List By Value    id=accountType    ${ACCOUNT_TYPE}    #选择账户类型（B8002富友，B8010存管）
+    Click Button    id=btnListQuery    #点击查询
+    sleep    5
+    Select Checkbox    id=allcheck    #复选框勾选
+    Click Button    id=launchLoanAll    #点击批量放款
+    Wait Until Page Contains Element    xpath=/html/body/div[2]/div[2]/div[4]/a[1]    10    确定提示框没有出现
+    Click Element    xpath=/html/body/div[2]/div[2]/div[4]/a[1]    #点击放款确定按钮
+    Wait Until Page Contains Element    xpath=/html/body/div[2]/div[2]/div[1]    10    放款结果信息没有展示
+    Wait Until Page Contains Element    xpath=/html/body/div[2]/div[2]/div[3]/a    10    放款结果确定按钮没有展示
+    ${message}    Get Text    xpath=/html/body/div[2]/div[2]/div[1]
+    Click Element    xpath=/html/body/div[2]/div[2]/div[3]/a    #点击确定按钮
+    Unselect Frame
+    ${result}    Run Keyword And Return Status    Should Contain    ${message}    成功
+    sleep    2
+    [Return]    ${result}
+
+查询放款报盘文件
+    [Arguments]    ${loan_db}    ${APPID}
+    @{filename}    Query    SELECT a.REQ_FILE,a.FILE_TYPE FROM ${loan_db}.t_lon_batch_file_log a LEFT JOIN ${loan_db}.t_loan_trans_info b ON a.TBI_SEQ=b.BATCH_SEQ WHERE \ b.TRANS_TYPE='D' AND b.APP_ID='${APPID}'
+    ${len}    Get Length    ${filename}
+    : FOR    ${j}    IN RANGE    ${len}
+    \    log    @{filename[${j}]}[1]
+    \    Run Keyword If    "@{filename[${j}]}[1]"=="ECD"    ftp_file_down    182.92.118.156    test_p2p    u7s3dpdT
+    \    ...    /zhangwu    @{filename[${j}]}[0]
+    \    Run Keyword If    "@{filename[${j}]}[1]"=="ECD"    modify_repeatedly    ../amt_file/@{filename[${j}]}[0]    4    P2P10062|
+    \    Run Keyword If    "@{filename[${j}]}[1]"=="ECD"    modify_repeatedly    ../amt_file/@{filename[${j}]}[0]    8    2|成功|
+    \    Run Keyword If    "@{filename[${j}]}[1]"=="FTD"    ftp_file_down    182.92.118.156    test_p2p    u7s3dpdT
+    \    ...    /zhangwu    @{filename[${j}]}[0]
+    \    Run Keyword If    "@{filename[${j}]}[1]"=="FTD"    modify_repeatedly    ../amt_file/@{filename[${j}]}[0]    14    2|成功|
+    \    Run Keyword If    "@{filename[${j}]}[1]"=="CMD"    ftp_file_down    182.92.118.156    test_p2p    u7s3dpdT
+    \    ...    /zhangwu    @{filename[${j}]}[0]
+    \    Run Keyword If    "@{filename[${j}]}[1]"=="CMD"    modify_repeatedly    ../amt_file/@{filename[${j}]}[0]    8    2|成功|
+    \    log    ../amt_file/@{filename[${j}]}[0]
+    \    ftp_file_up    182.92.118.156    test_p2p    u7s3dpdT    /zhangwu_return    ../amt_file/@{filename[${j}]}[0]
+
+放款回盘
+    [Arguments]    ${BATCH_SEQ}
+    ${nowtime}    Get Time
+    ${date}    Set Variable    ${nowtime[0:10]}
+    Select Frame    id=fraMain
+    Execute Javascript    window.document.getElementById('batchDateStart').value='${date}'
+    Execute Javascript    window.document.getElementById('batchDateEnd').value='${date}'
+    Select From List By Value    name=batchSts    E
+    Click Button    id=btnListQuery
+    sleep    2
+    : FOR    ${i}    IN RANGE    1    30    2
+    \    Wait Until Page Contains Element    css=table.simpleListTable:nth-child(4) > tbody:nth-child(2) > tr:nth-child(${i}) > td:nth-child(2)    10    放款批次号没有出现
+    \    ${beach_number}    Get Text    css=table.simpleListTable:nth-child(4) > tbody:nth-child(2) > tr:nth-child(${i}) > td:nth-child(2)
+    \    Exit For Loop If    '${beach_number}'=='${BATCH_SEQ}'
+    Click Element    xpath=//*[@id="tblResultOfSglTbl"]/tbody/tr[${i}]/td[14]/a[2]    #点击回盘链接
+    Wait Until Page Contains Element    xpath=/html/body/div[2]/div[2]/div[4]/a[1]    10    确定提示框没有出现    #等待页面元素出现
+    Click Element    xpath=/html/body/div[2]/div[2]/div[4]/a[1]    #点击提示框中确定按钮
+    Wait Until Page Contains Element    xpath=/html/body/div[3]/div[2]/div[3]/a    10    提示信息框没有出现    #等待页面元素出现
+    ${message}    Get Text    xpath=/html/body/div[3]/div[2]/div[1]    #获取文字信息
+    Click Element    xpath=/html/body/div[3]/div[2]/div[3]/a    #点击确定按钮
+    Unselect Frame
+    ${result}    Run Keyword And Return Status    Should Contain    ${message}    成功
+    [Return]    ${result}
+
+放款结果校验
+    [Arguments]    ${loan_db}    ${APPID}
+    #工单表工单状态
+    ${app_status}    ${result_app_status}    工单状态_APP_STATUS    ${APPID}    F0243    ${loan_db}
+    #查询交易表
+    ${b}    Query    SELECT PROC_STS,TRANS_STS FROM ${loan_db}.t_loan_trans_info WHERE APP_ID='${APPID}' AND TRANS_TYPE='D'
+    #比较
+    ${proc_sts_result}    Set Variable If    '${b[0][0]}'=='E'    PASS    FAIL
+    ${trans_sts_result}    Set Variable If    '${b[0][1]}'=='S'    PASS    FAIL
+    #结果
+    @{result}    Create List    ${app_status}    ${result_app_status}    ${b[0][0]}    ${proc_sts_result}    ${b[0][1]}
+    ...    ${trans_sts_result}
+    [Return]    @{result}
+
+338还款计划校验
+    [Arguments]    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}
+    #查合同生成器入参
+    ${c}    Query    SELECT APPROVE_AMT,YEAR_RATE,MONTH_RATE,APPROVE_LIMIT,LOAN_DATE,CONTRACT_AMT,DRAWN_AMT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'
+    ${d}    Query    SELECT RISK_GRADE FROM ${loan_db}.t_lon_credit_report WHERE APP_ID='${APPID}' LIMIT 1
+    #查还款计划
+    ${e}    Query    SELECT PLAN_REPAY_DATE,PLAN_REPAY_AMT,PRINCIPAL,INTEREST,REMAIN_PRINCIPAL_AMT,REPAY_OFF_AMT FROM ${loan_db}.t_rep_repayment WHERE app_id='${APPID}'
+    #写入合同生成器
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    2    ${c[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    4    2    =${c[0][1]}    #合同年利率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    6    2    =${c[0][2]}    #月平息
+    addExcel    ${ExcelFile}    ${ExcelSheet}    7    2    ${c[0][3]}    #期限
+    addExcel    ${ExcelFile}    ${ExcelSheet}    10    2    ${c[0][4][0:10]}    #放款日期
+    addExcel    ${ExcelFile}    ${ExcelSheet}    12    2    ${d[0][0]}    #风险等级
+    Refresh Excel    ${ExcelFile}
+    #取合同器还款计划
+    @{Repayment_plan}    Rows Read Excel 2    ${ExcelFile}    ${ExcelSheet}    23
+    ${repayment_date}    Convert To String    @{Repayment_plan}[1]    #将datetime类型转换    为字符串类型
+    #比较
+    ${Repayment_plan1}    Set Variable If    '${repayment_date[0:10]}'=='${e[0][0]}'    PASS    FAIL
+    ${Repayment_plan2}    Set Variable If    @{Repayment_plan}[2]==${e[0][1]}    PASS    FAIL
+    ${Repayment_plan3}    Set Variable If    @{Repayment_plan}[3]==${e[0][2]}    PASS    FAIL
+    ${Repayment_plan4}    Set Variable If    @{Repayment_plan}[4]==${e[0][3]}    PASS    FAIL
+    ${Repayment_plan5}    Set Variable If    @{Repayment_plan}[5]==${e[0][4]}    PASS    FAIL
+    ${Repayment_plan6}    Set Variable If    @{Repayment_plan}[6]==${e[0][5]}    PASS    FAIL
+    #结果
+    @{result1}    Create List    ${repayment_date[0:10]}    ${e[0][0]}    ${Repayment_plan1}    @{Repayment_plan}[2]    ${e[0][1]}
+    ...    ${Repayment_plan2}    @{Repayment_plan}[3]    ${e[0][2]}    ${Repayment_plan3}
+    @{result}    Create List    @{result1}    @{Repayment_plan}[4]    ${e[0][3]}    ${Repayment_plan4}    @{Repayment_plan}[5]
+    ...    ${e[0][4]}    ${Repayment_plan5}    @{Repayment_plan}[6]    ${e[0][5]}    ${Repayment_plan6}
+    [Return]    @{result}
+
+245还款计划校验
+    [Arguments]    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,LOAN_DATE,CONTRACT_AMT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查合同生成器入参
+    @{b}    Query    SELECT RISK_GRADE FROM ${loan_db}.t_lon_credit_report WHERE APP_ID='${APPID}' AND CREDIT_TYPE='F0206'    #查入参风险等级
+    @{c}    Query    SELECT PLAN_REPAY_DATE,PLAN_REPAY_AMT,PRINCIPAL,INTEREST FROM ${loan_db}.t_rep_repayment WHERE APP_ID='${APPID}'    #查询还款计划
+    #写入合同生成器
+    addExcel    ${ExcelFile}    ${ExcelSheet}    2    2    ${a[0][0]}    #借款金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    2    ${a[0][1]}    #天数
+    addExcel    ${ExcelFile}    ${ExcelSheet}    4    2    ${a[0][2][0:10]}    #放款日期
+    addExcel    ${ExcelFile}    ${ExcelSheet}    6    2    @{b[0]}[0]    #评级
+    Refresh Excel    ${ExcelFile}
+    #取合同器还款计划
+    ${plan_date}    Read Excel    ${ExcelFile}    ${ExcelSheet}    4    5
+    @{Repayment_plan}    Rows Read Excel 2    ${ExcelFile}    ${ExcelSheet}    13
+    #转换
+    ${REPAY_AMT}    Convert To Number    @{Repayment_plan}[1]    2
+    ${PRINCIPAL}    Convert To Number    @{Repayment_plan}[2]    2
+    ${INTEREST}    Convert To Number    @{Repayment_plan}[3]    2
+    #比较
+    ${result1}    Set Variable If    '${plan_date[0:10]}'=='@{c[0]}[0]'    PASS    FAIL
+    ${result2}    Set Variable If    ${REPAY_AMT}==@{c[0]}[1]    PASS    FAIL
+    ${result3}    Set Variable If    ${PRINCIPAL}==@{c[0]}[2]    PASS    FAIL
+    ${result4}    Set Variable If    ${INTEREST}==@{c[0]}[3]    PASS    FAIL
+    #结果
+    @{result}    Create List    ${plan_date[0:10]}    @{c[0]}[0]    ${result1}    ${REPAY_AMT}    @{c[0]}[1]
+    ...    ${result2}    ${PRINCIPAL}    @{c[0]}[2]    ${result3}    ${INTEREST}    @{c[0]}[3]
+    ...    ${result4}
+    [Return]    @{result}
+
+371还款计划校验
+    [Arguments]    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}    ${DataExcelFile}    ${plan_result}
+    ...    ${row_number}
+    ${plus}    set variable    ${row_number}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,LOAN_DATE,CONTRACT_AMT,ADVISORY_SERVICE_AMT,MONTH_REPAY_LIMIT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{b}    Query    SELECT STAGE,PLAN_REPAY_DATE,PLAN_REPAY_AMT,REMAIN_PRINCIPAL_AMT,INTEREST,PRINCIPAL FROM ${loan_db}.t_rep_repayment WHERE APP_ID='${APPID}'    #查询还款计划
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    2    ${a[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    4    2    ${a[0][1]}    #期限
+    addExcel    ${ExcelFile}    ${ExcelSheet}    5    2    =${a[0][2]}    #年利率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    8    2    ${a[0][3][0:10]}    #放款日期
+    Refresh Excel    ${ExcelFile}
+    #取合同器还款计划
+    : FOR    ${i}    IN RANGE    ${a[0][1]}
+    \    ${row}    Evaluate    20+${i}
+    \    @{plan}    Rows Read Excel 2    ${ExcelFile}    ${ExcelSheet}    ${row}
+    \    ${plan1}    Convert To String    @{plan}[1]
+    \    ${plan2}    Convert To Number    @{plan}[2]    2
+    \    ${plan3}    Convert To Number    @{plan}[3]    2
+    \    ${plan4}    Convert To Number    @{plan}[4]    2
+    \    ${plan5}    Convert To Number    @{plan}[5]    2
+    \    ${result1}    Set Variable If    '@{plan}[0]'=='@{b[${i}]}[0]'    PASS    FAIL
+    \    ${result2}    Set Variable If    '${plan1[0:10]}'=='@{b[${i}]}[1]'    PASS    FAIL
+    \    ${result3}    Set Variable If    ${plan2}==@{b[${i}]}[2]    PASS    FAIL
+    \    ${result4}    Set Variable If    ${plan3}==@{b[${i}]}[3]    PASS    FAIL
+    \    ${result5}    Set Variable If    ${plan4}==@{b[${i}]}[4]    PASS    FAIL
+    \    ${result6}    Set Variable If    ${plan5}==@{b[${i}]}[5]    PASS    FAIL
+    \    @{rsultA}    Create List    ${APPID}    @{plan}[0]    @{b[${i}]}[0]    ${result1}
+    \    ...    ${plan1[0:10]}    @{b[${i}]}[1]    ${result2}    ${plan2}    @{b[${i}]}[2]
+    \    ...    ${result3}
+    \    @{rsult}    Create List    @{rsultA}    ${plan3}    @{b[${i}]}[3]    ${result4}
+    \    ...    ${plan4}    @{b[${i}]}[4]    ${result5}    ${plan5}    @{b[${i}]}[5]
+    \    ...    ${result6}
+    \    listAddExcel    ${DataExcelFile}    ${plan_result}    ${plus}    1    @{rsult}
+    \    ${plus}    plusPlus    ${plus}
+
+326还款计划校验
+    [Arguments]    ${base_db}    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}    ${DataExcelFile}
+    ...    ${plan_result}    ${row_number}
+    ${plus}    set variable    ${row_number}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,MONTH_RATE,LOAN_DATE,PRODUCT_ID,PRODUCT_VERSION,CONTRACT_AMT,MONTH_REPAY_LIMIT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{b}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_risk_fund WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #查信用管理费费率
+    @{c}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_inst_service_rate WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #查恒元费用比例
+    @{d}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_insurance_rate WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #保险费费率
+    @{e}    Query    SELECT RISK_GRADE FROM ${loan_db}.t_lon_credit_report WHERE APP_ID='${APPID}' LIMIT 1    #查询风险等级
+    @{f}    Query    SELECT STAGE,PLAN_REPAY_DATE,PLAN_REPAY_AMT,REMAIN_PRINCIPAL_AMT,INTEREST,PRINCIPAL,REPAY_OFF_AMT FROM ${loan_db}.t_rep_repayment WHERE APP_ID='${APPID}'    #查询还款计划
+    #判断风险等级
+    @{g}    Create List    A    B    C    D    E
+    ...    AA    BB
+    : FOR    ${j}    IN RANGE    7
+    \    Exit For Loop If    '@{g}[${j}]'=='@{e[0]}[0]'
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    2    ${a[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    4    2    ${a[0][1]}    #审批期限
+    addExcel    ${ExcelFile}    ${ExcelSheet}    5    2    =${a[0][2]}    #年利率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    8    2    =@{b[0]}[${j}]    #信用管理费费率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    9    2    =@{c[0]}[${j}]    #恒元费用比例
+    addExcel    ${ExcelFile}    ${ExcelSheet}    10    2    =@{d[0]}[${j}]    #保险费费率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    11    2    =${a[0][3]}    #平息利率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    12    2    ${a[0][4][0:10]}    #放款日期
+    addExcel    ${ExcelFile}    ${ExcelSheet}    14    2    @{e[0]}[0]    #风险等级
+    Refresh Excel    ${ExcelFile}
+    #取合同器还款计划
+    : FOR    ${i}    IN RANGE    ${a[0][1]}
+    \    ${row}    Evaluate    23+${i}
+    \    @{plan}    Rows Read Excel 2    ${ExcelFile}    ${ExcelSheet}    ${row}
+    \    ${plan1}    Convert To String    @{plan}[1]
+    \    ${plan2}    Convert To Number    @{plan}[2]    2
+    \    ${plan3}    Convert To Number    @{plan}[3]    2
+    \    ${plan4}    Convert To Number    @{plan}[4]    2
+    \    ${plan5}    Convert To Number    @{plan}[5]    2
+    \    ${plan6}    Convert To Number    @{plan}[6]    2
+    \    ${result1}    Set Variable If    '@{plan}[0]'=='@{f[${i}]}[0]'    PASS    FAIL
+    \    ${result2}    Set Variable If    '${plan1[0:10]}'=='@{f[${i}]}[1]'    PASS    FAIL
+    \    ${result3}    Set Variable If    ${plan2}==@{f[${i}]}[2]    PASS    FAIL
+    \    ${result4}    Set Variable If    ${plan3}==@{f[${i}]}[3]    PASS    FAIL
+    \    ${result5}    Set Variable If    ${plan4}==@{f[${i}]}[4]    PASS    FAIL
+    \    ${result6}    Set Variable If    ${plan5}==@{f[${i}]}[5]    PASS    FAIL
+    \    ${result7}    Set Variable If    ${plan6}==@{f[${i}]}[6]    PASS    FAIL
+    \    @{rsultA}    Create List    ${APPID}    @{plan}[0]    @{f[${i}]}[0]    ${result1}
+    \    ...    ${plan1[0:10]}    @{f[${i}]}[1]    ${result2}    ${plan2}    @{f[${i}]}[2]
+    \    ...    ${result3}    ${plan3}    @{f[${i}]}[3]    ${result4}
+    \    @{rsult}    Create List    @{rsultA}    ${plan4}    @{f[${i}]}[4]    ${result5}
+    \    ...    ${plan5}    @{f[${i}]}[5]    ${result6}    ${plan6}    @{f[${i}]}[6]
+    \    ...    ${result7}
+    \    listAddExcel    ${DataExcelFile}    ${plan_result}    ${plus}    1    @{rsult}
+    \    ${plus}    plusPlus    ${plus}
+
+342还款计划校验
+    [Arguments]    ${loan_db}    ${APPID}    ${ExcelFile}    ${DataExcelFile}    ${plan_result}    ${row_number}
+    ${plus}    set variable    ${row_number}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,LOAN_DATE,REPAY_DAY,DRAWN_AMT,CONTRACT_AMT,MONTH_REPAY_LIMIT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{b}    Query    SELECT FEE_AMT FROM ${loan_db}.t_loan_fee_info WHERE APP_ID='${APPID}' ORDER BY FIELD(FEE_TYPE,'B6643','B6644','B6603','B6648','B6636','B6635')    #查询费用
+    @{c}    Query    SELECT STAGE,PLAN_REPAY_DATE,PLAN_REPAY_AMT,REMAIN_PRINCIPAL_AMT,INTEREST,PRINCIPAL,REPAY_OFF_AMT FROM ${loan_db}.t_rep_repayment WHERE APP_ID='${APPID}'    #查询还款计划信息
+    #写入excel
+    addExcel    ${ExcelFile}    ${a[0][1]}    7    2    ${a[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${a[0][1]}    8    2    @{b[0]}[0]    #机构返点
+    addExcel    ${ExcelFile}    ${a[0][1]}    14    2    =${a[0][2]}    #年利率
+    addExcel    ${ExcelFile}    ${a[0][1]}    16    2    ${a[0][3][0:10]}    #放款日期
+    addExcel    ${ExcelFile}    ${a[0][1]}    17    2    ${a[0][4]}    #还款日
+    Refresh Excel    ${ExcelFile}
+    #读取EXXEl结果
+    ${end_number}    Evaluate    38+${a[0][1]}
+    @{plan0}    Rows Read Excel    ${ExcelFile}    ${a[0][1]}    36
+    @{F}    cellListReadExcel    ${ExcelFile}    ${a[0][1]}    F    38    ${end_number}
+    @{E}    cellListReadExcel    ${ExcelFile}    ${a[0][1]}    E    38    ${end_number}
+    #转换
+    ${date}    Convert To String    @{plan0}[1]
+    ${plan_amt}    Convert To Number    @{plan0}[7]    2
+    #计算0期    剩余本金及利息
+    ${REMAIN_AMT}    Set Variable    0
+    ${INTEREST}    Set Variable    0
+    : FOR    ${j}    IN RANGE    ${a[0][1]}
+    \    ${money1}    Convert To Number    @{F}[${j}]    2
+    \    ${money2}    Convert To Number    @{E}[${j}]    2
+    \    ${REMAIN_AMT}    Evaluate    ${REMAIN_AMT}+${money1}
+    \    ${INTEREST}    Evaluate    ${INTEREST}+${money2}
+    ${PRINCIPAL}    Evaluate    ${plan_amt}-${INTEREST}
+    ${OFF_AMT}    Evaluate    ${REMAIN_AMT}+${INTEREST}
+    #比较第0期
+    ${result1}    Set Variable If    '@{plan0}[0]'=='@{c[0]}[0]'    PASS    FAIL
+    ${result2}    Set Variable If    '${date[0:10]}'=='@{c[0]}[1]'    PASS    FAIL
+    ${result3}    Set Variable If    ${plan_amt}==@{c[0]}[2]    PASS    FAIL
+    ${result4}    Set Variable If    ${REMAIN_AMT}==@{c[0]}[3]    PASS    FAIL
+    ${result5}    Set Variable If    ${INTEREST}==@{c[0]}[4]    PASS    FAIL
+    ${result6}    Set Variable If    ${PRINCIPAL}==@{c[0]}[5]    PASS    FAIL
+    ${result7}    Set Variable If    ${OFF_AMT}==@{c[0]}[6]    PASS    FAIL
+    @{resultA}    Create List    ${APPID}    @{plan0}[0]    @{c[0]}[0]    ${result1}    ${date[0:10]}
+    ...    @{c[0]}[1]    ${result2}    ${plan_amt}    @{c[0]}[2]    ${result3}    ${REMAIN_AMT}
+    ...    @{c[0]}[3]    ${result4}
+    @{result}    Create List    @{resultA}    ${INTEREST}    @{c[0]}[4]    ${result5}    ${PRINCIPAL}
+    ...    @{c[0]}[5]    ${result6}    ${OFF_AMT}    @{c[0]}[6]    ${result7}
+    listAddExcel    ${DataExcelFile}    ${plan_result}    ${plus}    1    @{result}
+    ${plus}    plusPlus    ${plus}
+    #比较其他期
+    ${times}    Evaluate    ${a[0][1]}+1
+    : FOR    ${i}    IN RANGE    1    ${times}
+    \    ${row}    Evaluate    36+${i}
+    \    @{plan}    Rows Read Excel 2    ${ExcelFile}    ${a[0][1]}    ${row}
+    \    ${plan1}    Convert To String    @{plan}[1]
+    \    ${plan6}    Convert To Number    @{plan}[6]    2
+    \    ${plan8}    Convert To Number    @{plan}[8]    2
+    \    ${result8}    Set Variable If    '@{plan}[0]'=='@{c[${i}]}[0]'    PASS    FAIL
+    \    ${result9}    Set Variable If    '${plan1[0:10]}'=='@{c[${i}]}[1]'    PASS    FAIL
+    \    ${result10}    Set Variable If    ${plan8}==@{c[${i}]}[2]    PASS    FAIL
+    \    ${result11}    Set Variable If    ${plan6}==@{c[${i}]}[3]    PASS    FAIL
+    \    ${result12}    Set Variable If    ${plan8}==@{c[${i}]}[5]    PASS    FAIL
+    \    ${result13}    Set Variable If    ${plan6}==@{c[${i}]}[6]    PASS    FAIL
+    \    @{resultB}    Create List    ${APPID}    @{plan}[0]    @{c[${i}]}[0]    ${result8}
+    \    ...    ${plan1[0:10]}    @{c[${i}]}[1]    ${result9}    ${plan8}    @{c[${i}]}[2]
+    \    ...    ${result10}    ${plan6}    @{c[${i}]}[3]    ${result11}
+    \    @{finally_result}    Create List    @{resultB}    0    @{c[${i}]}[4]    PASS
+    \    ...    ${plan8}    @{c[${i}]}[5]    ${result12}    ${plan6}    @{c[${i}]}[6]
+    \    ...    ${result13}
+    \    listAddExcel    ${DataExcelFile}    ${plan_result}    ${plus}    1    @{finally_result}
+    \    ${plus}    plusPlus    ${plus}
+
+298还款计划校验
+    [Arguments]    ${base_db}    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}    ${DataExcelFile}
+    ...    ${plan_result}    ${row_number}
+    ${plus}    set variable    ${row_number}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,MONTH_RATE,LOAN_DATE,PRODUCT_ID,PRODUCT_VERSION,CONTRACT_AMT,MONTH_REPAY_LIMIT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{b}    Query    SELECT INFO_VALUE FROM ${loan_db}.pl_loan_fee_extra_info WHERE APP_ID='${APPID}' AND INFO_NAME IN('riskFundRate','B11404')    #查信用管理费费率
+    @{c}    Query    SELECT INFO_VALUE FROM ${loan_db}.pl_loan_fee_extra_info WHERE APP_ID='${APPID}' AND INFO_NAME IN('serviceRate','B11403')    #咨询服务费率
+    @{d}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_inst_service_rate WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #查恒元费用比例
+    @{e}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_insurance_rate WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #查保险费费率
+    @{g}    Query    SELECT RISK_GRADE FROM ${loan_db}.t_lon_credit_report WHERE APP_ID='${APPID}' LIMIT 1    #查风险等级
+    @{f}    Query    SELECT STAGE,PLAN_REPAY_DATE,PLAN_REPAY_AMT,REMAIN_PRINCIPAL_AMT,INTEREST,PRINCIPAL,REPAY_OFF_AMT FROM ${loan_db}.t_rep_repayment WHERE APP_ID='${APPID}'    #查询还款计划
+    #判断风险等级
+    @{h}    Create List    A    B    C    D    E
+    ...    AA    BB
+    : FOR    ${j}    IN RANGE    7
+    \    Exit For Loop If    '@{h}[${j}]'=='@{g[0]}[0]'
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    2    ${a[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    4    2    ${a[0][1]}    #审批期限
+    addExcel    ${ExcelFile}    ${ExcelSheet}    5    2    =${a[0][2]}    #年利率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    9    2    =@{b[0]}[0]    #信用管理费费率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    10    2    =@{c[0]}[0]    #咨询服务费率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    11    2    =@{d[0]}[${j}]    #恒元费用比例
+    addExcel    ${ExcelFile}    ${ExcelSheet}    12    2    =@{e[0]}[${j}]    #保险费费率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    13    2    ${a[0][4][0:10]}    #放款日期
+    addExcel    ${ExcelFile}    ${ExcelSheet}    15    2    @{g[0]}[0]    #风险等级
+    Refresh Excel    ${ExcelFile}
+    #取合同器还款计划
+    : FOR    ${i}    IN RANGE    ${a[0][1]}
+    \    ${row}    Evaluate    25+${i}
+    \    @{plan}    Rows Read Excel 2    ${ExcelFile}    ${ExcelSheet}    ${row}
+    \    ${plan1}    Convert To String    @{plan}[1]
+    \    ${plan2}    Convert To Number    @{plan}[2]    2
+    \    ${plan3}    Convert To Number    @{plan}[3]    2
+    \    ${plan4}    Convert To Number    @{plan}[4]    2
+    \    ${plan5}    Convert To Number    @{plan}[5]    2
+    \    ${plan6}    Convert To Number    @{plan}[6]    2
+    \    ${result1}    Set Variable If    '@{plan}[0]'=='@{f[${i}]}[0]'    PASS    FAIL
+    \    ${result2}    Set Variable If    '${plan1[0:10]}'=='@{f[${i}]}[1]'    PASS    FAIL
+    \    ${result3}    Set Variable If    ${plan2}==@{f[${i}]}[2]    PASS    FAIL
+    \    ${result4}    Set Variable If    ${plan3}==@{f[${i}]}[3]    PASS    FAIL
+    \    ${result5}    Set Variable If    ${plan4}==@{f[${i}]}[4]    PASS    FAIL
+    \    ${result6}    Set Variable If    ${plan5}==@{f[${i}]}[5]    PASS    FAIL
+    \    ${result7}    Set Variable If    ${plan6}==@{f[${i}]}[6]    PASS    FAIL
+    \    @{resultA}    Create List    ${APPID}    @{plan}[0]    @{f[${i}]}[0]    ${result1}
+    \    ...    ${plan1[0:10]}    @{f[${i}]}[1]    ${result2}    ${plan2}    @{f[${i}]}[2]
+    \    ...    ${result3}    ${plan3}    @{f[${i}]}[3]    ${result4}
+    \    @{result}    Create List    @{resultA}    ${plan4}    @{f[${i}]}[4]    ${result5}
+    \    ...    ${plan5}    @{f[${i}]}[5]    ${result6}    ${plan6}    @{f[${i}]}[6]
+    \    ...    ${result7}
+    \    listAddExcel    ${DataExcelFile}    ${plan_result}    ${plus}    1    @{result}
+    \    ${plus}    plusPlus    ${plus}
+
+235还款计划校验
+    [Arguments]    ${base_db}    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}    ${DataExcelFile}
+    ...    ${plan_result}    ${row_number}
+    ${plus}    set variable    ${row_number}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,MONTH_RATE,LOAN_DATE,PRODUCT_ID,PRODUCT_VERSION,CONTRACT_AMT,MONTH_REPAY_LIMIT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{b}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_risk_fund WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #查信用管理费比例
+    @{c}    Query    SELECT RISK_GRADE FROM ${loan_db}.t_lon_credit_report WHERE APP_ID='${APPID}' LIMIT 1    #查风险等级
+    @{f}    Query    SELECT STAGE,PLAN_REPAY_DATE,PLAN_REPAY_AMT,REMAIN_PRINCIPAL_AMT,INTEREST,PRINCIPAL,REPAY_OFF_AMT FROM ${loan_db}.t_rep_repayment WHERE APP_ID='${APPID}'    #查还款计划
+    #判断风险等级
+    @{h}    Create List    A    B    C    D    E
+    ...    AA    BB
+    : FOR    ${j}    IN RANGE    7
+    \    Exit For Loop If    '@{h}[${j}]'=='@{c[0]}[0]'
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    2    ${a[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    4    2    ${a[0][1]}    #期限
+    addExcel    ${ExcelFile}    ${ExcelSheet}    8    2    =@{b[0]}[${j}]    #信用管理费比例
+    addExcel    ${ExcelFile}    ${ExcelSheet}    9    2    ${a[0][4][0:10]}    #放款日期
+    addExcel    ${ExcelFile}    ${ExcelSheet}    5    7    @{c[0]}[0]    #风险等级
+    Refresh Excel    ${ExcelFile}
+    #取合同器还款计划
+    : FOR    ${i}    IN RANGE    ${a[0][1]}
+    \    ${row}    Evaluate    28+${i}
+    \    @{plan}    Rows Read Excel 2    ${ExcelFile}    ${ExcelSheet}    ${row}
+    \    ${plan1}    Convert To String    @{plan}[1]
+    \    ${plan2}    Convert To Number    @{plan}[2]    2
+    \    ${plan3}    Convert To Number    @{plan}[3]    2
+    \    ${plan4}    Convert To Number    @{plan}[4]    2
+    \    ${plan5}    Convert To Number    @{plan}[5]    2
+    \    ${plan6}    Convert To Number    @{plan}[6]    2
+    \    ${result1}    Set Variable If    '@{plan}[0]'=='@{f[${i}]}[0]'    PASS    FAIL
+    \    ${result2}    Set Variable If    '${plan1[0:10]}'=='@{f[${i}]}[1]'    PASS    FAIL
+    \    ${result3}    Set Variable If    ${plan2}==@{f[${i}]}[2]    PASS    FAIL
+    \    ${result4}    Set Variable If    ${plan3}==@{f[${i}]}[3]    PASS    FAIL
+    \    ${result5}    Set Variable If    ${plan4}==@{f[${i}]}[4]    PASS    FAIL
+    \    ${result6}    Set Variable If    ${plan5}==@{f[${i}]}[5]    PASS    FAIL
+    \    ${result7}    Set Variable If    ${plan6}==@{f[${i}]}[6]    PASS    FAIL
+    \    @{resultA}    Create List    ${APPID}    @{plan}[0]    @{f[${i}]}[0]    ${result1}
+    \    ...    ${plan1[0:10]}    @{f[${i}]}[1]    ${result2}    ${plan2}    @{f[${i}]}[2]
+    \    ...    ${result3}    ${plan3}    @{f[${i}]}[3]    ${result4}
+    \    @{result}    Create List    @{resultA}    ${plan4}    @{f[${i}]}[4]    ${result5}
+    \    ...    ${plan5}    @{f[${i}]}[5]    ${result6}    ${plan6}    @{f[${i}]}[6]
+    \    ...    ${result7}
+    \    listAddExcel    ${DataExcelFile}    ${plan_result}    ${plus}    1    @{result}
+    \    ${plus}    plusPlus    ${plus}
+
+318还款计划校验
+    [Arguments]    ${base_db}    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}    ${DataExcelFile}
+    ...    ${plan_result}    ${row_number}
+    ${plus}    set variable    ${row_number}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,MONTH_RATE,LOAN_DATE,PRODUCT_ID,PRODUCT_VERSION,CONTRACT_AMT,MONTH_REPAY_LIMIT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{b}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_risk_fund WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #风险备用金率
+    @{c}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_quell_base_rate WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #客户平息利率
+    @{d}    Query    SELECT RISK_GRADE FROM ${loan_db}.t_lon_credit_report WHERE APP_ID='${APPID}' LIMIT 1    #查询风险等级
+    @{f}    Query    SELECT STAGE,PLAN_REPAY_DATE,PLAN_REPAY_AMT,REMAIN_PRINCIPAL_AMT,INTEREST,PRINCIPAL,REPAY_OFF_AMT FROM ${loan_db}.t_rep_repayment WHERE APP_ID='${APPID}'    #查询还款计划
+    #判断风险等级
+    @{h}    Create List    A    B    C    D    E
+    ...    AA    BB
+    : FOR    ${j}    IN RANGE    7
+    \    Exit For Loop If    '@{h}[${j}]'=='@{d[0]}[0]'
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    2    ${a[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    4    2    ${a[0][1]}    #期限
+    addExcel    ${ExcelFile}    ${ExcelSheet}    8    2    =@{b[0]}[${j}]    #风险备用金率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    12    2    =@{c[0]}[${j}]    #风险备用金率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    13    2    ${a[0][4][0:10]}    #放款日期
+    addExcel    ${ExcelFile}    ${ExcelSheet}    15    2    @{d[0]}[0]    #风险等级
+    Refresh Excel    ${ExcelFile}
+    #取合同器还款计划
+    : FOR    ${i}    IN RANGE    ${a[0][1]}
+    \    ${row}    Evaluate    27+${i}
+    \    @{plan}    Rows Read Excel 2    ${ExcelFile}    ${ExcelSheet}    ${row}
+    \    ${plan1}    Convert To String    @{plan}[1]
+    \    ${plan2}    Convert To Number    @{plan}[2]    2
+    \    ${plan3}    Convert To Number    @{plan}[3]    2
+    \    ${plan4}    Convert To Number    @{plan}[4]    2
+    \    ${plan5}    Convert To Number    @{plan}[5]    2
+    \    ${plan6}    Convert To Number    @{plan}[6]    2
+    \    ${result1}    Set Variable If    '@{plan}[0]'=='@{f[${i}]}[0]'    PASS    FAIL
+    \    ${result2}    Set Variable If    '${plan1[0:10]}'=='@{f[${i}]}[1]'    PASS    FAIL
+    \    ${result3}    Set Variable If    ${plan2}==@{f[${i}]}[2]    PASS    FAIL
+    \    ${result4}    Set Variable If    ${plan3}==@{f[${i}]}[3]    PASS    FAIL
+    \    ${result5}    Set Variable If    ${plan4}==@{f[${i}]}[4]    PASS    FAIL
+    \    ${result6}    Set Variable If    ${plan5}==@{f[${i}]}[5]    PASS    FAIL
+    \    ${result7}    Set Variable If    ${plan6}==@{f[${i}]}[6]    PASS    FAIL
+    \    @{resultA}    Create List    ${APPID}    @{plan}[0]    @{f[${i}]}[0]    ${result1}
+    \    ...    ${plan1[0:10]}    @{f[${i}]}[1]    ${result2}    ${plan2}    @{f[${i}]}[2]
+    \    ...    ${result3}    ${plan3}    @{f[${i}]}[3]    ${result4}
+    \    @{result}    Create List    @{resultA}    ${plan4}    @{f[${i}]}[4]    ${result5}
+    \    ...    ${plan5}    @{f[${i}]}[5]    ${result6}    ${plan6}    @{f[${i}]}[6]
+    \    ...    ${result7}
+    \    listAddExcel    ${DataExcelFile}    ${plan_result}    ${plus}    1    @{result}
+    \    ${plus}    plusPlus    ${plus}
+
+354还款计划校验
+    [Arguments]    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,LOAN_DATE,CONTRACT_AMT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{b}    Query    SELECT STAGE,PLAN_REPAY_DATE,PLAN_REPAY_AMT,REMAIN_PRINCIPAL_AMT,INTEREST,PRINCIPAL,REPAY_OFF_AMT FROM ${loan_db}.t_rep_repayment WHERE APP_ID='${APPID}'    #查询还款计划
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    2    ${a[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    4    2    ${a[0][1]}    #审批期限
+    addExcel    ${ExcelFile}    ${ExcelSheet}    9    2    ${a[0][3][0:10]}    #放款日期
+    Refresh Excel    ${ExcelFile}
+    #取合同器还款计划
+    @{plan}    Rows Read Excel 2    ${ExcelFile}    ${ExcelSheet}    19
+    #转换
+    ${plan1}    Convert To String    @{plan}[1]
+    ${plan2}    Convert To Number    @{plan}[2]    2
+    ${plan3}    Convert To Number    @{plan}[3]    2
+    ${plan4}    Convert To Number    @{plan}[4]    2
+    ${plan5}    Convert To Number    @{plan}[5]    2
+    ${plan6}    Convert To Number    @{plan}[6]    2
+    #比较
+    ${result1}    Set Variable If    '@{plan}[0]'=='@{b[0]}[0]'    PASS    FAIL
+    ${result2}    Set Variable If    '${plan1[0:10]}'=='@{b[0]}[1]'    PASS    FAIL
+    ${result3}    Set Variable If    ${plan2}==@{b[0]}[2]    PASS    FAIL
+    ${result4}    Set Variable If    ${plan3}==@{b[0]}[3]    PASS    FAIL
+    ${result5}    Set Variable If    ${plan4}==@{b[0]}[4]    PASS    FAIL
+    ${result6}    Set Variable If    ${plan5}==@{b[0]}[5]    PASS    FAIL
+    ${result7}    Set Variable If    ${plan6}==@{b[0]}[6]    PASS    FAIL
+    #结果
+    @{resultA}    Create List    ${APPID}    @{plan}[0]    @{b[0]}[0]    ${result1}    ${plan1[0:10]}
+    ...    @{b[0]}[1]    ${result2}    ${plan2}    @{b[0]}[2]    ${result3}    ${plan3}
+    ...    @{b[0]}[3]    ${result4}
+    @{result}    Create List    @{resultA}    ${plan4}    @{b[0]}[4]    ${result5}    ${plan5}
+    ...    @{b[0]}[5]    ${result6}    ${plan6}    @{b[0]}[6]    ${result7}
+    [Return]    @{result}
+
+93还款计划校验
+    [Arguments]    ${base_db}    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}    ${DataExcelFile}
+    ...    ${plan_result}    ${row_number}
+    ${plus}    set variable    ${row_number}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,MONTH_RATE,LOAN_DATE,PRODUCT_ID,PRODUCT_VERSION,CONTRACT_AMT,MONTH_REPAY_LIMIT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{b}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_risk_fund WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #信用管理费费率
+    @{c}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_insurance_rate WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #保险费费率
+    @{d}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_manager_rate WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #贷后管理费费率
+    @{e}    Query    SELECT RISK_GRADE FROM ${loan_db}.t_lon_credit_report WHERE APP_ID='${APPID}' LIMIT 1    #查询风险等级
+    @{f}    Query    SELECT STAGE,PLAN_REPAY_DATE,PLAN_REPAY_AMT,REMAIN_PRINCIPAL_AMT,INTEREST,PRINCIPAL,REPAY_OFF_AMT FROM ${loan_db}.t_rep_repayment WHERE APP_ID='${APPID}'    #查询还款计划
+    #判断风险等级
+    @{h}    Create List    A    B    C    D    E
+    ...    AA    BB
+    : FOR    ${j}    IN RANGE    7
+    \    Exit For Loop If    '@{h}[${j}]'=='@{e[0]}[0]'
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    2    ${a[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    4    2    ${a[0][1]}    #期限
+    addExcel    ${ExcelFile}    ${ExcelSheet}    5    2    =${a[0][2]}    #年利率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    7    2    =@{b[0]}[${j}]    #信用管理费费率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    8    2    =@{c[0]}[${j}]    #保险费费率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    9    2    =@{d[0]}[${j}]    #贷后管理费费率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    10    2    =${a[0][3]}    #平息利率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    11    2    ${a[0][4][0:10]}    #放款日期
+    addExcel    ${ExcelFile}    ${ExcelSheet}    13    2    @{e[0]}[0]    #风险等级
+    Refresh Excel    ${ExcelFile}
+    #取合同器还款计划
+    : FOR    ${i}    IN RANGE    ${a[0][1]}
+    \    ${row}    Evaluate    21+${i}
+    \    @{plan}    Rows Read Excel 2    ${ExcelFile}    ${ExcelSheet}    ${row}
+    \    ${plan1}    Convert To String    @{plan}[1]
+    \    ${plan2}    Convert To Number    @{plan}[2]    2
+    \    ${plan3}    Convert To Number    @{plan}[3]    2
+    \    ${plan4}    Convert To Number    @{plan}[4]    2
+    \    ${plan5}    Convert To Number    @{plan}[5]    2
+    \    ${plan6}    Convert To Number    @{plan}[6]    2
+    \    ${result1}    Set Variable If    '@{plan}[0]'=='@{f[${i}]}[0]'    PASS    FAIL
+    \    ${result2}    Set Variable If    '${plan1[0:10]}'=='@{f[${i}]}[1]'    PASS    FAIL
+    \    ${result3}    Set Variable If    ${plan2}==@{f[${i}]}[2]    PASS    FAIL
+    \    ${result4}    Set Variable If    ${plan3}==@{f[${i}]}[3]    PASS    FAIL
+    \    ${result5}    Set Variable If    ${plan4}==@{f[${i}]}[4]    PASS    FAIL
+    \    ${result6}    Set Variable If    ${plan5}==@{f[${i}]}[5]    PASS    FAIL
+    \    ${result7}    Set Variable If    ${plan6}==@{f[${i}]}[6]    PASS    FAIL
+    \    @{resultA}    Create List    ${APPID}    @{plan}[0]    @{f[${i}]}[0]    ${result1}
+    \    ...    ${plan1[0:10]}    @{f[${i}]}[1]    ${result2}    ${plan2}    @{f[${i}]}[2]
+    \    ...    ${result3}    ${plan3}    @{f[${i}]}[3]    ${result4}
+    \    @{result}    Create List    @{resultA}    ${plan4}    @{f[${i}]}[4]    ${result5}
+    \    ...    ${plan5}    @{f[${i}]}[5]    ${result6}    ${plan6}    @{f[${i}]}[6]
+    \    ...    ${result7}
+    \    listAddExcel    ${DataExcelFile}    ${plan_result}    ${plus}    1    @{result}
+    \    ${plus}    plusPlus    ${plus}
+
+365还款计划校验
+    [Arguments]    ${base_db}    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,MONTH_RATE,LOAN_DATE,PRODUCT_ID,PRODUCT_VERSION,CONTRACT_AMT,MONTH_REPAY_LIMIT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{b}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_risk_fund WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #信用管理费费率
+    @{c}    Query    SELECT RISK_GRADE FROM ${loan_db}.t_lon_credit_report WHERE APP_ID='${APPID}' LIMIT 1    #查询风险等级
+    @{f}    Query    SELECT STAGE,PLAN_REPAY_DATE,PLAN_REPAY_AMT,REMAIN_PRINCIPAL_AMT,INTEREST,PRINCIPAL,REPAY_OFF_AMT FROM ${loan_db}.t_rep_repayment WHERE APP_ID='${APPID}'    #查询还款计划
+    #判断风险等级
+    @{h}    Create List    A    B    C    D    E
+    ...    AA    BB
+    : FOR    ${j}    IN RANGE    7
+    \    Exit For Loop If    '@{h}[${j}]'=='@{c[0]}[0]'
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    3    ${a[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    4    3    ${a[0][1]}    #期限
+    addExcel    ${ExcelFile}    ${ExcelSheet}    5    3    ${a[0][4][0:10]}    #放款日期
+    addExcel    ${ExcelFile}    ${ExcelSheet}    5    9    =@{b[0]}[${j}]    #信用管理费率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    7    3    @{c[0]}[0]    #风险等级
+    Refresh Excel    ${ExcelFile}
+    #读取EXXEl结果
+    ${lon_date}    Read Excel    ${ExcelFile}    ${ExcelSheet}    5    6
+    @{fee}    List Read Excel    ${ExcelFile}    ${ExcelSheet}    15    3    3
+    #转换
+    ${fee1}    Convert To Number    @{fee}[0]    2
+    ${fee2}    Convert To Number    @{fee}[1]    2
+    ${fee3}    Convert To Number    @{fee}[2]    2
+    #比较
+    ${result1}    Set Variable If    '${lon_date[0:10]}'=='@{f[0]}[1]'    PASS    FAIL
+    ${result2}    Set Variable If    ${fee1}==@{f[0]}[2]    PASS    FAIL
+    ${result3}    Set Variable If    ${fee2}==@{f[0]}[5]    PASS    FAIL
+    ${result4}    Set Variable If    ${fee3}==@{f[0]}[4]    PASS    FAIL
+    #结果
+    @{resultA}    Create List    ${APPID}    ${lon_date[0:10]}    @{f[0]}[1]    ${result1}    ${fee1}
+    ...    @{f[0]}[2]    ${result2}
+    @{result}    Create List    @{resultA}    ${fee2}    @{f[0]}[5]    ${result3}    ${fee3}
+    ...    @{f[0]}[4]    ${result4}
+    [Return]    @{result}
+
+148还款计划校验
+    [Arguments]    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,MONTH_RATE,LOAN_DATE,PRODUCT_ID,PRODUCT_VERSION,CONTRACT_AMT,MONTH_REPAY_LIMIT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{b}    Query    SELECT STAGE,PLAN_REPAY_DATE,PLAN_REPAY_AMT,REMAIN_PRINCIPAL_AMT,INTEREST,PRINCIPAL,REPAY_OFF_AMT FROM ${loan_db}.t_rep_repayment WHERE APP_ID='${APPID}'    #查询还款计划
+    ${number}    Evaluate    22+${a[0][1]}
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    2    ${a[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    4    2    ${a[0][1]}    #期限
+    addExcel    ${ExcelFile}    ${ExcelSheet}    5    2    =${a[0][3]}    #平息利率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    6    2    =${a[0][2]}    #年利率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    8    2    ${a[0][4][0:10]}    #放款日期
+    Refresh Excel    ${ExcelFile}
+    #读取EXXEl结果
+    @{plan}    Rows Read Excel 2    ${ExcelFile}    ${ExcelSheet}    ${number}
+    #转换
+    ${plan1}    Convert To String    @{plan}[1]
+    ${plan2}    Convert To Number    @{plan}[2]    2
+    ${plan3}    Convert To Number    @{plan}[3]    2
+    ${plan4}    Convert To Number    @{plan}[4]    2
+    ${plan5}    Convert To Number    @{plan}[5]    2
+    ${plan6}    Convert To Number    @{plan}[6]    2
+    #比较
+    ${result2}    Set Variable If    '${plan1[0:10]}'=='@{b[0]}[1]'    PASS    FAIL
+    ${result3}    Set Variable If    ${plan2}==@{b[0]}[2]    PASS    FAIL
+    ${result4}    Set Variable If    ${plan3}==@{b[0]}[3]    PASS    FAIL
+    ${result5}    Set Variable If    ${plan4}==@{b[0]}[4]    PASS    FAIL
+    ${result6}    Set Variable If    ${plan5}==@{b[0]}[5]    PASS    FAIL
+    ${result7}    Set Variable If    ${plan6}==@{b[0]}[6]    PASS    FAIL
+    #结果
+    @{resultA}    Create List    ${APPID}    ${plan1[0:10]}    @{b[0]}[1]    ${result2}    ${plan2}
+    ...    @{b[0]}[2]    ${result3}    ${plan3}    @{b[0]}[3]    ${result4}
+    @{result}    Create List    @{resultA}    ${plan4}    @{b[0]}[4]    ${result5}    ${plan5}
+    ...    @{b[0]}[5]    ${result6}    ${plan6}    @{b[0]}[6]    ${result7}
+    [Return]    @{result}
+
+375还款计划校验
+    [Arguments]    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}    ${DataExcelFile}    ${plan_result}
+    ...    ${row_number}
+    ${plus}    set variable    ${row_number}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,MONTH_RATE,LOAN_DATE,PRODUCT_ID,PRODUCT_VERSION,CONTRACT_AMT,MONTH_REPAY_LIMIT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{f}    Query    SELECT STAGE,PLAN_REPAY_DATE,PLAN_REPAY_AMT,REMAIN_PRINCIPAL_AMT,INTEREST,PRINCIPAL,REPAY_OFF_AMT FROM ${loan_db}.t_rep_repayment WHERE APP_ID='${APPID}'    #查询还款计划
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    2    2    ${a[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    3    2    ${a[0][1]}    #期限
+    addExcel    ${ExcelFile}    ${ExcelSheet}    4    2    ${a[0][3]}    #平息利率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    8    2    ${a[0][4][0:10]}    #放款日期
+    Refresh Excel    ${ExcelFile}
+    #取合同器还款计划
+    : FOR    ${i}    IN RANGE    ${a[0][1]}
+    \    ${row}    Evaluate    19+${i}
+    \    @{plan}    Rows Read Excel 2    ${ExcelFile}    ${ExcelSheet}    ${row}
+    \    ${plan1}    Convert To String    @{plan}[1]
+    \    ${plan2}    Convert To Number    @{plan}[2]    2
+    \    ${plan3}    Convert To Number    @{plan}[3]    2
+    \    ${plan4}    Convert To Number    @{plan}[4]    2
+    \    ${plan5}    Convert To Number    @{plan}[5]    2
+    \    ${result1}    Set Variable If    '@{plan}[0]'=='@{f[${i}]}[0]'    PASS    FAIL
+    \    ${result2}    Set Variable If    '${plan1[0:10]}'=='@{f[${i}]}[1]'    PASS    FAIL
+    \    ${result3}    Set Variable If    ${plan2}==@{f[${i}]}[2]    PASS    FAIL
+    \    ${result4}    Set Variable If    ${plan3}==@{f[${i}]}[3]    PASS    FAIL
+    \    ${result5}    Set Variable If    ${plan4}==@{f[${i}]}[4]    PASS    FAIL
+    \    ${result6}    Set Variable If    ${plan5}==@{f[${i}]}[5]    PASS    FAIL
+    \    @{resultA}    Create List    ${APPID}    @{plan}[0]    @{f[${i}]}[0]    ${result1}
+    \    ...    ${plan1[0:10]}    @{f[${i}]}[1]    ${result2}    ${plan2}    @{f[${i}]}[2]
+    \    ...    ${result3}    ${plan3}    @{f[${i}]}[3]    ${result4}
+    \    @{result}    Create List    @{resultA}    ${plan4}    @{f[${i}]}[4]    ${result5}
+    \    ...    ${plan5}    @{f[${i}]}[5]    ${result6}
+    \    listAddExcel    ${DataExcelFile}    ${plan_result}    ${plus}    1    @{result}
+    \    ${plus}    plusPlus    ${plus}
+
+277还款计划校验
+    [Arguments]    ${base_db}    ${loan_db}    ${APPID}    ${ExcelFile}    ${ExcelSheet}
+    ${a}    Query    SELECT APPROVE_AMT,APPROVE_LIMIT,YEAR_RATE,MONTH_RATE,LOAN_DATE,PRODUCT_ID,PRODUCT_VERSION,CONTRACT_AMT,MONTH_REPAY_LIMIT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'    #查询合同生成器入参
+    @{e}    Query    SELECT YEAR_RATE FROM ${base_db}.t_prd_pack_year_rate WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #查询打包价年利率
+    @{c}    Query    SELECT LEVEL_A,LEVEL_B,LEVEL_C,LEVEL_D,LEVEL_E,LEVEL_A_A,LEVEL_B_B FROM ${base_db}.t_prd_year_rate WHERE PRODUCT_ID='${a[0][5]}' AND TIMES='${a[0][1]}' AND VERSION='${a[0][6]}'    #查询年利率
+    @{d}    Query    SELECT RISK_GRADE FROM ${loan_db}.t_lon_credit_report WHERE APP_ID='${APPID}' LIMIT 1    #查询风险等级
+    @{b}    Query    SELECT STAGE,PLAN_REPAY_DATE,PLAN_REPAY_AMT,REMAIN_PRINCIPAL_AMT,INTEREST,PRINCIPAL,REPAY_OFF_AMT FROM ${loan_db}.t_rep_repayment WHERE APP_ID='${APPID}'    #查询还款计划
+    #判断风险等级
+    @{h}    Create List    A    B    C    D    E
+    ...    AA    BB
+    : FOR    ${j}    IN RANGE    7
+    \    Exit For Loop If    '@{h}[${j}]'=='@{d[0]}[0]'
+    #写入excel
+    addExcel    ${ExcelFile}    ${ExcelSheet}    7    2    ${a[0][0]}    #审批金额
+    addExcel    ${ExcelFile}    ${ExcelSheet}    8    2    ${a[0][1]}    #期限
+    addExcel    ${ExcelFile}    ${ExcelSheet}    9    2    =@{e[0]}[0]    #打包价年利率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    11    2    =@{c[0]}[${j}]    #合同年利率
+    addExcel    ${ExcelFile}    ${ExcelSheet}    13    2    ${a[0][4][0:10]}    #放款日期
+    Refresh Excel    ${ExcelFile}
+    #取合同器还款计划
+    @{plan}    Rows Read Excel 2    ${ExcelFile}    ${ExcelSheet}    28
+    #转换
+    ${plan1}    Convert To String    @{plan}[1]
+    ${plan2}    Convert To Number    @{plan}[2]    2
+    ${plan3}    Convert To Number    @{plan}[3]    2
+    ${plan4}    Convert To Number    @{plan}[4]    2
+    ${plan5}    Convert To Number    @{plan}[5]    2
+    ${plan6}    Convert To Number    @{plan}[6]    2
+    #比较
+    ${result1}    Set Variable If    '@{plan}[0]'=='@{b[0]}[0]'    PASS    FAIL
+    ${result2}    Set Variable If    '${plan1[0:10]}'=='@{b[0]}[1]'    PASS    FAIL
+    ${result3}    Set Variable If    ${plan2}==@{b[0]}[2]    PASS    FAIL
+    ${result4}    Set Variable If    ${plan3}==@{b[0]}[3]    PASS    FAIL
+    ${result5}    Set Variable If    ${plan4}==@{b[0]}[4]    PASS    FAIL
+    ${result6}    Set Variable If    ${plan5}==@{b[0]}[5]    PASS    FAIL
+    ${result7}    Set Variable If    ${plan6}==@{b[0]}[6]    PASS    FAIL
+    #结果
+    @{resultA}    Create List    ${APPID}    @{plan}[0]    @{b[0]}[0]    ${result1}    ${plan1[0:10]}
+    ...    @{b[0]}[1]    ${result2}    ${plan2}    @{b[0]}[2]    ${result3}    ${plan3}
+    ...    @{b[0]}[3]    ${result4}
+    @{result}    Create List    @{resultA}    ${plan4}    @{b[0]}[4]    ${result5}    ${plan5}
+    ...    @{b[0]}[5]    ${result6}    ${plan6}    @{b[0]}[6]    ${result7}
+    [Return]    @{result}
+
+270还款计划校验
+
+查询期数
+    [Arguments]    ${loan_db}    ${APPID}
+    @{a}    Query    SELECT APPROVE_LIMIT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'
+    [Return]    @{a[0]}[0]
+
+批次表信息核对
+    [Arguments]    ${loan_db}    ${APPID}
+    ${a}    Query    SELECT a.PROC_STS,a.BATCH_STS,a.BATCH_TYPE FROM ${loan_db}.t_batch_trans_info a LEFT JOIN ${loan_db}.t_loan_trans_info b ON a.BTI_SEQ=b.BATCH_SEQ WHERE b.APP_ID='${APPID}'
+    ${b}    Query    SELECT ACCOUNT_TYPE FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'
+    ${c}    Set Variable If    '''${b[0][0]}'''=='''B8010'''    DC01    DT01
+    ${result1}    Set Variable If    '''${a[0][0]}'''=='''BE'''    PASS    FAIL
+    ${result2}    Set Variable If    '''${a[0][1]}'''=='''S'''    PASS    FAIL
+    ${result3}    Set Variable If    '''${a[0][2]}'''=='''${c}'''    PASS    FAIL
+    @{result}    Create List    ${a[0][0]}    ${result1}    ${a[0][1]}    ${result2}    ${b[0][0]}
+    ...    ${a[0][2]}    ${result3}
+    [Return]    @{result}
+
+资金流校验
+    [Arguments]    ${base_db}    ${loan_db}    ${APPID}    ${DataExcelFile}    ${zijin}    ${row_number}
+    ${m}    Create List
+    ${n}    Create List
+    ${plus}    set variable    ${row_number}
+    #查询工单表信息
+    @{a}    Query    SELECT PRODUCT_ID,PRODUCT_VERSION,ACCOUNT_TYPE,TRUSTEE_TYPE,DRAWN_AMT,APPROVE_AMT,CONTRACT_AMT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'
+    log    ${a}
+    #查费用在配置中    金额为0的条数
+    #${b}    Row Count    SELECT a.FEE_TYPE,a.FEE_AMT FROM ${loan_db}.t_loan_fee_info a LEFT JOIN ${base_db}.t_prd_fund_flows b ON a.FEE_TYPE=b.TRANSACTION_TYPE WHERE a.APP_ID='${APPID}' AND a.FEE_AMT=0 AND b.PRODUCT_ID='@{a[0]}[0]' AND b.VERSION='@{a[0]}[1]' AND b.loan_company_code='@{a[0]}[2]'
+    #查费用信息    包含在配置表的那些
+    @{c}    Query    SELECT DISTINCT(a.FEE_TYPE),a.FEE_AMT FROM ${loan_db}.t_loan_fee_info a LEFT JOIN ${base_db}.t_prd_fund_flows b ON a.FEE_TYPE=b.TRANSACTION_TYPE WHERE a.APP_ID='${APPID}' AND b.PRODUCT_ID='@{a[0]}[0]' AND b.VERSION='@{a[0]}[1]' AND b.loan_company_code='@{a[0]}[2]'
+    ${len_c}    Get Length    ${c}
+    log    ${c}
+    #查询保险类型
+    ${baoxian}    Query    SELECT guara_company_code FROM ${loan_db}.t_mls_loan_safeguard_info WHERE APP_ID='${APPID}'
+    #查基础库    6501类型的信息
+    @{e}    Query    SELECT TRANSACTION_TYPE,PAYMENT_ACCOUNT_STATUS,PAYMENT_ACCOUNT_TYPE,PAYMENT_ACCOUNT_NO,PAYMENT_ACCOUNT_NAME,GATHERING_ACCOUNT_TYPE,GATHERING_ACCOUNT_NO,GATHERING_ACCOUNT_NAME FROM ${base_db}.t_prd_fund_flows WHERE PRODUCT_ID='@{a[0]}[0]' AND VERSION='@{a[0]}[1]' AND loan_company_code='@{a[0]}[2]' AND FLOWS_BUSINESS_TYPE='B6501' AND (guarantee_company='${baoxian[0][0]}' \ OR guarantee_company IS NULL) \ ORDER BY SERIAL_NUMBER
+    ${len_e}    Get Length    ${e}
+    log    ${e}
+    #查基础库    6502或6503类型的信息
+    @{f}    Query    SELECT TRANSACTION_TYPE,FROZEN_THAW_ACCOUNT_TYPE,FROZEN_THAW_NO,FROZEN_THAW_NAME FROM ${base_db}.t_prd_fund_flows WHERE PRODUCT_ID='@{a[0]}[0]' AND VERSION='@{a[0]}[1]' AND loan_company_code='@{a[0]}[2]' AND FLOWS_BUSINESS_TYPE IN('B6502','B6503') AND (guarantee_company='${baoxian[0][0]}' OR guarantee_company IS NULL) ORDER BY SERIAL_NUMBER
+    ${len_f}    Get Length    ${f}
+    log    ${f}
+    #查询账户B6802
+    @{account1}    Query    SELECT ACC_ACCOUNT,ACC_ACCOUNT_NAME FROM ${loan_db}.t_lon_account WHERE APP_ID='${APPID}' AND ACC_TYPE='B6802' AND TRUSTEE_TYPE='@{a[0]}[3]' AND ACCOUNT_PRO='@{a[0]}[2]'
+    ${len_account1}    Get Length    ${account1}
+    ${finally_acc1}    Set Variable If    ${len_account1}==1    @{account1[0]}[0]    wu
+    ${finally_acc_name1}    Set Variable If    ${len_account1}==1    @{account1[0]}[1]    wu
+    log    ${account1}
+    #查询账户B6803
+    @{account2}    Query    SELECT ACC_ACCOUNT,ACC_ACCOUNT_NAME FROM ${loan_db}.t_lon_account WHERE APP_ID='${APPID}' AND ACC_TYPE='B6803' AND TRUSTEE_TYPE='@{a[0]}[3]' AND ACCOUNT_PRO='@{a[0]}[2]'
+    ${len_account2}    Get Length    ${account2}
+    ${finally_acc2}    Set Variable If    ${len_account2}==1    @{account2[0]}[0]    wu
+    ${finally_acc_name2}    Set Variable If    ${len_account2}==1    @{account2[0]}[1]    wu
+    log    ${account2}
+    #组装
+    : FOR    ${i}    IN RANGE    ${len_c}
+    \    Append To List    ${m}    @{c[${i}]}[0]
+    \    log    ${m}
+    \    Append To List    ${n}    @{c[${i}]}[1]
+    \    log    ${n}
+    Append To List    ${m}    B6608    B6602    B6601
+    log    ${m}
+    Append To List    ${n}    @{a[0]}[4]    @{a[0]}[5]    @{a[0]}[6]
+    log    ${n}
+    ${number}    Evaluate    ${len_c}+3
+    log    ${len_c}
+    log    ${number}
+    #比较
+    : FOR    ${j}    IN RANGE    ${len_e}
+    \    ${PAY_ACC_TYPE}    Set Variable If    '@{e[${j}]}[1]'=='B6901'    ACC_DJ_ST    ACC_JD_ST
+    \    log    ${PAY_ACC_TYPE}
+    \    @{value}    Run Keyword If    '@{a[0]}[2]'=='B8002'    Query    SELECT TRANSACTION_TYPE,CASH_TYPE,TRANS_AMT,STS,PAY_ACCT_NO,PAY_ACCT_NAME,RCV_ACCT_NO,RCV_ACCT_NAME FROM ${loan_db}.t_cash_flow_detail WHERE APP_ID='${APPID}' AND TRANSACTION_TYPE='@{e[${j}]}[0]' AND PAY_ACCT_TYPE='${PAY_ACC_TYPE}' AND CASH_TYPE='T' AND EXTRO_INFO IS NULL
+    \    ...    ELSE    Query    SELECT TRANSACTION_TYPE,CASH_TYPE,TRANS_AMT,STS,PAY_ACCT_NO,PAY_ACCT_NAME,RCV_ACCT_NO,RCV_ACCT_NAME FROM ${loan_db}.t_cash_flow_detail WHERE APP_ID='${APPID}' AND TRANSACTION_TYPE='@{e[${j}]}[0]' AND CASH_TYPE='T' AND EXTRO_INFO IS NULL
+    \    log    ${value}
+    \    ${len}    Get Length    ${value}
+    \    ${position}    判断位置    @{e[${j}]}[0]    ${number}    @{m}
+    \    ${TRANS_AMT}    Set Variable If    ${len}==1    @{value[0]}[2]    wu
+    \    ${result1}    资金流金额比较    ${TRANS_AMT}    ${n[${position}]}    ${len}
+    \    log    ${TRANS_AMT}
+    \    ${sts}    Set Variable If    ${len}==1    @{value[0]}[3]    wu
+    \    ${result2}    资金流状态比较    ${sts}    ${n[${position}]}    ${len}
+    \    ${PAY_ACCT_NO}    Set Variable If    ${len}==1    @{value[0]}[4]    wu
+    \    ${result3}    资金流账户比较    @{e[${j}]}[2]    ${PAY_ACCT_NO}    ${finally_acc1}    ${finally_acc2}
+    \    ...    @{e[${j}]}[3]    ${len}    ${n[${position}]}
+    \    ${PAY_ACCT_NAME}    Set Variable If    ${len}==1    @{value[0]}[5]    wu
+    \    ${result4}    资金流账户比较    @{e[${j}]}[2]    ${PAY_ACCT_NAME}    ${finally_acc_name1}    ${finally_acc_name2}
+    \    ...    @{e[${j}]}[4]    ${len}    ${n[${position}]}
+    \    ${RCV_ACCT_NO}    Set Variable If    ${len}==1    @{value[0]}[6]    wu
+    \    ${result5}    资金流账户比较    @{e[${j}]}[5]    ${RCV_ACCT_NO}    ${finally_acc1}    ${finally_acc2}
+    \    ...    @{e[${j}]}[6]    ${len}    ${n[${position}]}
+    \    ${RCV_ACCT_NAME}    Set Variable If    ${len}==1    @{value[0]}[7]    wu
+    \    ${result6}    资金流账户比较    @{e[${j}]}[5]    ${RCV_ACCT_NAME}    ${finally_acc_name1}    ${finally_acc_name2}
+    \    ...    @{e[${j}]}[7]    ${len}    ${n[${position}]}
+    \    @{resultA}    Create List    ${APPID}    @{e[${j}]}[0]    T    ${TRANS_AMT}
+    \    ...    ${result1}    ${sts}    ${result2}    @{e[${j}]}[2]
+    \    @{result}    Create List    @{resultA}    ${PAY_ACCT_NO}    ${result3}    ${PAY_ACCT_NAME}
+    \    ...    ${result4}    @{e[${j}]}[5]    ${RCV_ACCT_NO}    ${result5}    ${RCV_ACCT_NAME}
+    \    ...    ${result6}
+    \    listAddExcel    ${DataExcelFile}    ${zijin}    ${plus}    1    @{result}
+    \    ${plus}    plusPlus    ${plus}
+    : FOR    ${k}    IN RANGE    ${len_f}
+    \    @{value}    Query    SELECT TRANSACTION_TYPE,CASH_TYPE,TRANS_AMT,STS,PAY_ACCT_NO,PAY_ACCT_NAME,RCV_ACCT_NO,RCV_ACCT_NAME FROM ${loan_db}.t_cash_flow_detail WHERE APP_ID='${APPID}' AND TRANSACTION_TYPE='@{f[${k}]}[0]' AND CASH_TYPE='U'
+    \    ${len}    Get Length    ${value}
+    \    ${position}    判断位置    @{f[${k}]}[0]    ${number}    @{m}
+    \    ${TRANS_AMT}    Set Variable If    ${len}==1    @{value[0]}[2]    wu
+    \    ${result7}    资金流金额比较    ${TRANS_AMT}    ${n[${position}]}    ${len}
+    \    ${sts}    Set Variable If    ${len}==1    @{value[0]}[3]    wu
+    \    ${result8}    资金流状态比较    ${sts}    ${n[${position}]}    ${len}
+    \    ${PAY_ACCT_NO}    Set Variable If    ${len}==1    @{value[0]}[4]    wu
+    \    ${result9}    资金流账户比较    @{f[${k}]}[1]    ${PAY_ACCT_NO}    ${finally_acc1}    ${finally_acc2}
+    \    ...    @{f[${k}]}[2]    ${len}    ${n[${position}]}
+    \    ${PAY_ACCT_NAME}    Set Variable If    ${len}==1    @{value[0]}[5]    wu
+    \    ${result10}    资金流账户比较    @{f[${k}]}[1]    ${PAY_ACCT_NAME}    ${finally_acc_name1}    ${finally_acc_name2}
+    \    ...    @{f[${k}]}[3]    ${len}    ${n[${position}]}
+    \    @{resultC}    Create List    ${APPID}    @{f[${k}]}[0]    U    ${TRANS_AMT}
+    \    ...    ${result7}    ${sts}    ${result8}    @{f[${k}]}[1]    ${PAY_ACCT_NO}
+    \    ...    ${result9}    ${PAY_ACCT_NAME}    ${result10}
+    \    listAddExcel    ${DataExcelFile}    ${zijin}    ${plus}    1    @{resultC}
+    \    ${plus}    plusPlus    ${plus}
+
+判断位置
+    [Arguments]    ${TRANSACTION_TYPE}    ${len}    @{value}
+    : FOR    ${i}    IN RANGE    ${len}
+    \    Exit For Loop If    '${TRANSACTION_TYPE}'=='@{value}[${i}]'
+    [Return]    ${i}
+
+资金流金额比较
+    [Arguments]    ${TRANS_AMT}    ${fee}    ${len}
+    ${result}    Run Keyword If    ${len}==1    Set Variable If    ${TRANS_AMT}==${fee} and ${fee}!=0    PASS    FAIL
+    ...    ELSE IF    ${fee}==0 and ${len}==0    Set Variable    PASS
+    ...    ELSE    Set Variable    FAIL
+    [Return]    ${result}
+
+资金流状态比较
+    [Arguments]    ${sts}    ${fee}    ${len}
+    ${result}    Run Keyword If    ${len}==1    Set Variable If    '${sts}'=='S'    PASS    FAIL
+    ...    ELSE IF    ${len}==0    Set Variable If    ${fee}==0    PASS    FAIL
+    ...    ELSE    Set Variable    FAIL
+    [Return]    ${result}
+
+资金流账户比较
+    [Arguments]    ${a}    ${b}    ${finally_acc1}    ${finally_acc2}    ${d}    ${len}
+    ...    ${c}
+    ${result}    Run Keyword If    '${a}'=='B6802' and ${len}==1    Set Variable If    '${b}'=='${finally_acc1}'    PASS    FAIL
+    ...    ELSE IF    '${a}'=='B6802' and ${len}==0    Set Variable If    ${c}==0    PASS    FAIL
+    ...    ELSE IF    '${a}'=='B6803' and ${len}==1    Set Variable If    '${b}'=='${finally_acc2}'    PASS    FAIL
+    ...    ELSE IF    '${a}'=='B6803' and ${len}==0    Set Variable If    ${c}==0    PASS    FAIL
+    ...    ELSE IF    '${a}'=='B6804' and ${len}==1    Set Variable If    '${b}'=='${d}'    PASS    FAIL
+    ...    ELSE IF    '${a}'=='B6804' and ${len}==0    Set Variable If    ${c}==0    PASS    FAIL
+    ...    ELSE    Set Variable    FAIL
+    [Return]    ${result}
+
+查询配置条数
+    [Arguments]    ${base_db}    ${loan_db}    ${APPID}
+    @{a}    Query    SELECT PRODUCT_ID,PRODUCT_VERSION,ACCOUNT_TYPE,TRUSTEE_TYPE,DRAWN_AMT,APPROVE_AMT,CONTRACT_AMT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'
+    #查询保险类型
+    ${baoxian}    Query    SELECT guara_company_code FROM ${loan_db}.t_mls_loan_safeguard_info WHERE APP_ID='${APPID}'
+    ${d}    Row Count    SELECT * FROM ${base_db}.t_prd_fund_flows WHERE PRODUCT_ID='@{a[0]}[0]' AND VERSION='@{a[0]}[1]' AND loan_company_code='@{a[0]}[2]' AND (guarantee_company='${baoxian[0][0]}' \ OR guarantee_company IS NULL)
+    [Return]    ${d}
+
+定时器触发
+    [Arguments]    ${descriptiondescription}    ${idnumber}
+    Select Frame    id=fraMain
+    Clear Element Text    id=taskDesc
+    Input Text    id=taskDesc    ${descriptiondescription}    #输入任务描述信息
+    Click Button    id=btnListQuery    #点击查询
+    sleep    2
+    Click Button    id=${idnumber}TriggerBtn    #点击触发按钮
+    Wait Until Page Contains Element    xpath=/html/body/div[9]/div[2]/div[4]/a[1]    10    确认提示框没有出现    #等待页面元素出现
+    Click Element    xpath=/html/body/div[9]/div[2]/div[4]/a[1]    #点击确认框中的确定
+    Wait Until Page Contains Element    xpath=/html/body/div[9]/div[2]/div[3]/a    10    结果信息框没有出现    #等待页面元素出现
+    ${message}    Get Text    xpath=/html/body/div[9]/div[2]/div[1]    #获取文字信息
+    Click Element    xpath=/html/body/div[9]/div[2]/div[3]/a    #点击确定按钮
+    Unselect Frame
+    Should Contain    ${message}    处理成功
+
+代付
+    [Arguments]    ${appid}
+    Select Frame    id=fraMain
+    Clear Element Text    id=appId
+    Input Text    id=appId    ${appid}    #输入工单号
+    Select From List By Value    id=trusteeType    B134002    #选择存托类型为托管
+    Select From List By Value    id=accountType    B8002    #富友
+    Select From List By Value    id=withdrawType    B8008    #提现通道为富友代付
+    Click Button    id=btnListQuery    #点击查询
+    sleep    2
+    Select Checkbox    id=allcheck    #全选
+    Click Button    id=withdrawCashBuild    #点击资金流创建
+    Wait Until Page Contains Element    xpath=/html/body/div[16]/div[2]/div[4]/a[1]    10    确认提示框没有出现    #等待页面元素出现
+    Click Element    xpath=/html/body/div[16]/div[2]/div[4]/a[1]    #点击确认框中的确定
+    Wait Until Page Contains Element    xpath=/html/body/div[16]/div[2]/div[3]/a    10    结果信息框没有出现    #等待页面元素出现
+    ${message}    Get Text    xpath=/html/body/div[16]/div[2]/div[1]    #获取文字信息
+    Click Element    xpath=/html/body/div[16]/div[2]/div[3]/a    #点击确定按钮
+    Should Contain    ${message}    失败0笔
+    sleep    2
+    Select Checkbox    id=allcheck    #全选
+    Click Button    id=depositPayment    #点击代付
+    Wait Until Page Contains Element    xpath=/html/body/div[16]/div[2]/div[3]/a    10    结果信息框没有出现
+    ${result_message}    Get Text    xpath=/html/body/div[16]/div[2]/div[1]    #获取结果文字
+    Click Element    xpath=/html/body/div[16]/div[2]/div[3]/a    #点击确定
+    Unselect Frame
+    sleep    2
+    ${result}    Run Keyword And Return Status    Should Contain    ${result_message}    失败0笔
+    [Return]    ${result}
+
+提现
+    [Arguments]    ${appid}
+    Select Frame    id=fraMain
+    Input Text    id=appId    ${appid}    #输入工单号
+    Select From List By Value    id=trusteeType    B134001    #选择存托类型为存管
+    Select From List By Value    id=withdrawType    B8010    #选择提现通道为存管银行
+    Click Button    id=btnListQuery    #点击查询
+    sleep    2
+    Select Checkbox    id=allcheck    #全选
+    Click Button    id=withdrawCashBuild    #点击资金流创建
+    Wait Until Page Contains Element    xpath=/html/body/div[16]/div[2]/div[4]/a[1]    10    确认提示框没有出现    #等待页面元素出现
+    Click Element    xpath=/html/body/div[16]/div[2]/div[4]/a[1]    #点击确认框中的确定
+    Wait Until Page Contains Element    xpath=/html/body/div[16]/div[2]/div[3]/a    10    结果信息框没有出现    #等待页面元素出现
+    ${message}    Get Text    xpath=/html/body/div[16]/div[2]/div[1]    #获取文字信息
+    Click Element    xpath=/html/body/div[16]/div[2]/div[3]/a    #点击确定按钮
+    Should Contain    ${message}    失败0笔
+    sleep    2
+    Select Checkbox    id=allcheck    #全选
+    Click Button    id=depositWithdrawAll    #点击提现
+    Wait Until Page Contains Element    xpath=/html/body/div[16]/div[2]/div[4]/a[1]    10    确认提示框没有出现
+    Click Element    xpath=/html/body/div[16]/div[2]/div[4]/a[1]    #点击确认框中的确定
+    Wait Until Page Contains Element    xpath=/html/body/div[16]/div[2]/div[3]/a    10    结果信息框没有出现    #等待页面元素出现
+    ${result_message}    Get Text    xpath=/html/body/div[16]/div[2]/div[1]    #获取文字信息
+    Click Element    xpath=/html/body/div[16]/div[2]/div[3]/a    #点击确定
+    Unselect Frame
+    sleep    2
+    ${result}    Run Keyword And Return Status    Should Contain    ${result_message}    失败0笔
+    [Return]    ${result}
+
+查询提现流水号
+    [Arguments]    ${loan_db}    ${appid}
+    @{TRANS_NO}    Query    SELECT TRANS_NO FROM ${loan_db}.t_cash_flow_detail WHERE APP_ID='${appid}' AND CASH_TYPE='W'
+    [Return]    @{TRANS_NO[0]}[0]
+
+提现回盘
+    [Arguments]    ${url}    ${TRANS_NO}
+    ${data}    Set Variable    20180226||${TRANS_NO}|${TRANS_NO}|01|1258.56|CNY|01|001018022615308014|6222024107835246769|ICBK|102100099996|中国工商银行|1258.56|2|提现成功|${TRANS_NO},826646139,,tx,cms|004|20180226151402|bus|
+    log    ${data}
+    Create Session    api    ${url}
+    ${addr}    Get Request    api    /intf/financial/withDraw!transCallback.intf?result=${data}
+    ${sts_code}    Set Variable If    '''${addr.status_code}'''=='''200'''    ${addr.json()['sts']}    request_fail
+    ${result}    Set Variable If    '''${sts_code}'''=='''调用接口返回成功'''    True    False
+    Delete All Sessions
+    [Return]    ${result}
+
+查询提现交易状态
+    [Arguments]    ${loan_db}    ${APPID}
+    @{a}    Query    SELECT TX_SYS FROM ${loan_db}.t_loan_withdraw_amt WHERE APP_ID='${APPID}'
+    [Return]    @{a[0]}[0]
+
+代付结果校验
+    [Arguments]    ${base_db}    ${loan_db}    ${APPID}
+    #查询提现表
+    @{a}    Query    SELECT WITHDRAW_TYPE,TX_SYS,WITHDRAW_AMT FROM ${loan_db}.t_loan_withdraw_amt WHERE APP_ID='${APPID}'
+    #查询交易表
+    @{b}    Query    SELECT PROC_STS,TRANS_STS FROM ${loan_db}.t_loan_trans_info WHERE TRANS_TYPE='F' AND APP_ID='${APPID}'
+    #查询资金流表
+    @{c}    Query    SELECT STS,TRANS_AMT,PAY_ACCT_NO,PAY_ACCT_NAME,RCV_ACCT_NO,RCV_ACCT_NAME FROM ${loan_db}.t_cash_flow_detail WHERE CASH_TYPE='P' AND APP_ID='${APPID}'
+    #查询工单表
+    @{d}    Query    SELECT DRAWN_AMT FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'
+    #查基础库    系统配置表
+    @{e}    Query    SELECT PARAM_VALUE FROM ${base_db}.t_mgt_sys_param WHERE PARAM_CODE='loan_djplat_account'
+    @{f}    Query    SELECT PARAM_VALUE FROM ${base_db}.t_mgt_sys_param WHERE PARAM_CODE='loan_djplat_name'
+    #查询账户表
+    @{g}    Query    SELECT ACC_BANK_CARD,ACC_OWN_NAME FROM ${loan_db}.t_lon_account WHERE APP_ID='${APPID}' AND ACC_TYPE='B6802' AND TRUSTEE_TYPE='B134003'
+    #比较
+    ${result1}    Set Variable If    '@{a[0]}[0]'=='B8008'    PASS    FAIL
+    ${result2}    Set Variable If    '@{a[0]}[1]'=='S'    PASS    FAIL
+    ${result21}    Set Variable If    @{a[0]}[2]==@{d[0]}[0]    PASS    FAIL
+    ${result3}    Set Variable If    '@{b[0]}[0]'=='F8807'    PASS    FAIL
+    ${result4}    Set Variable If    '@{b[0]}[1]'=='S'    PASS    FAIL
+    ${result5}    Set Variable If    '@{c[0]}[0]'=='S'    PASS    FAIL
+    ${result6}    Set Variable If    @{c[0]}[1]==@{d[0]}[0]    PASS    FAIL
+    ${result7}    Set Variable If    '@{c[0]}[2]'=='@{e[0]}[0]'    PASS    FAIL
+    ${result8}    Set Variable If    '@{c[0]}[3]'=='@{f[0]}[0]'    PASS    FAIL
+    ${result9}    Set Variable If    '@{c[0]}[4]'=='@{g[0]}[0]'    PASS    FAIL
+    ${result10}    Set Variable If    '@{c[0]}[5]'=='@{g[0]}[1]'    PASS    FAIL
+    @{resultA}    Create List    @{a[0]}[0]    ${result1}    @{a[0]}[1]    ${result2}    @{a[0]}[2]
+    ...    @{d[0]}[0]    ${result21}    @{b[0]}[0]    ${result3}    @{b[0]}[1]    ${result4}
+    @{resultB}    Create List    @{resultA}    @{c[0]}[0]    ${result5}    @{c[0]}[1]    @{d[0]}[0]
+    ...    ${result6}    @{c[0]}[2]    ${result7}    @{c[0]}[3]    ${result8}
+    @{result}    Create List    @{resultB}    @{c[0]}[4]    ${result9}    @{c[0]}[5]    ${result10}
+    [Return]    @{result}
+
+提现结果校验
+    [Arguments]    ${base_db}    ${loan_db}    ${APPID}
+    ${m}    Create List
+    ${n}    Create List
+    #查询提现表
+    @{a}    Query    SELECT WITHDRAW_TYPE,TX_SYS,WITHDRAW_AMT FROM ${loan_db}.t_loan_withdraw_amt WHERE APP_ID='${APPID}'
+    #查询交易表
+    @{b}    Query    SELECT PROC_STS,TRANS_STS FROM ${loan_db}.t_loan_trans_info WHERE TRANS_TYPE='F' AND APP_ID='${APPID}'
+    #查询资金流表
+    @{c}    Query    SELECT STS,TRANS_AMT,PAY_ACCT_NO,PAY_ACCT_NAME,RCV_ACCT_NO,RCV_ACCT_NAME FROM ${loan_db}.t_cash_flow_detail WHERE CASH_TYPE='W' AND APP_ID='${APPID}'
+    #查询工单表
+    @{d}    Query    SELECT DRAWN_AMT,APPROVE_AMT,CONTRACT_AMT,PRODUCT_ID FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'
+    #查询配置
+    @{e}    Query    SELECT FEE_SUBJECT,PAYMENT_ACCOUNT_TYPE,PAYMENT_ACCOUNT_NO,PAYMENT_ACCOUNT_NAME FROM ${base_db}.t_prd_loan_withdraw WHERE PRODUCT_ID='@{d[0]}[3]' AND LOAN_CHANNEL='B8010'
+    #查询账户
+    @{f}    Query    SELECT ACC_ACCOUNT,ACC_ACCOUNT_NAME FROM ${loan_db}.t_lon_account WHERE APP_ID='${APPID}' AND ACC_TYPE='B6802' AND TRUSTEE_TYPE='B134001' AND ACCOUNT_PRO='B8010'
+    @{g}    Query    SELECT ACC_ACCOUNT,ACC_ACCOUNT_NAME FROM ${loan_db}.t_lon_account WHERE APP_ID='${APPID}' AND ACC_TYPE='B6803' AND TRUSTEE_TYPE='B134001' AND ACCOUNT_PRO='B8010'
+    @{h}    Run Keyword If    '@{e[0]}[1]'=='B6802'    Query    SELECT ACC_BANK_CARD,ACC_BANK_BRANCH FROM ${loan_db}.t_lon_account WHERE APP_ID='${APPID}' AND ACC_TYPE='B6802' AND TRUSTEE_TYPE='B134003'
+    ...    ELSE IF    '@{e[0]}[1]'=='B6803'    Query    SELECT ACC_BANK_CARD,ACC_BANK_BRANCH FROM ${loan_db}.t_lon_account WHERE APP_ID='${APPID}' AND ACC_TYPE='B6803' AND TRUSTEE_TYPE='B134003'
+    ...    ELSE IF    '@{e[0]}[1]'=='B6804'    Query    SELECT ACC_BANK_CARD,ACC_BANK_BRANCH FROM ${base_db}.t_prd_account WHERE ACC_ACCOUNT ='@{e[0]}[2]'
+    ...    ELSE    Create List    cuowu    cuowu
+    #查询费用表
+    @{k}    Query    SELECT FEE_TYPE,FEE_AMT FROM ${loan_db}.t_loan_fee_info WHERE APP_ID='${APPID}'
+    ${len}    Get Length    ${k}
+    #组装
+    : FOR    ${i}    IN RANGE    ${len}
+    \    Append To List    ${m}    @{k[${i}]}[0]
+    \    Append To List    ${n}    @{k[${i}]}[1]
+    Append To List    ${m}    B6608    B6602    B6601
+    Append To List    ${n}    @{d[0]}[0]    @{d[0]}[1]    @{d[0]}[2]
+    ${number}    Evaluate    ${len}+3
+    #判断费用类型
+    : FOR    ${j}    IN RANGE    ${number}
+    \    Exit For Loop If    '@{e[0]}[0]'=='${m[${j}]}'
+    #比较
+    ${result1}    Set Variable If    '@{a[0]}[0]'=='B8010'    PASS    FAIL
+    ${result2}    Set Variable If    '@{a[0]}[1]'=='S'    PASS    FAIL
+    ${result21}    Set Variable If    @{a[0]}[2]==${n[${j}]}    PASS    FAIL
+    ${result3}    Set Variable If    '@{b[0]}[0]'=='F8804'    PASS    FAIL
+    ${result4}    Set Variable If    '@{b[0]}[1]'=='S'    PASS    FAIL
+    ${result5}    Set Variable If    '@{c[0]}[0]'=='S'    PASS    FAIL
+    ${result6}    Set Variable If    @{c[0]}[1]==${n[${j}]}    PASS    FAIL
+    ${result7}    Run Keyword If    '@{e[0]}[1]'=='B6802'    Set Variable If    '@{c[0]}[2]'=='@{f[0]}[0]'    PASS    FAIL
+    ...    ELSE IF    '@{e[0]}[1]'=='B6803'    Set Variable If    '@{c[0]}[2]'=='@{g[0]}[0]'    PASS    FAIL
+    ...    ELSE IF    '@{e[0]}[1]'=='B6804'    Set Variable If    '@{c[0]}[2]'=='@{e[0]}[2]'    PASS    FAIL
+    ...    ELSE    Set Variable    FAIL
+    ${result8}    Run Keyword If    '@{e[0]}[1]'=='B6802'    Set Variable If    '@{c[0]}[3]'=='@{f[0]}[1]'    PASS    FAIL
+    ...    ELSE IF    '@{e[0]}[1]'=='B6803'    Set Variable If    '@{c[0]}[3]'=='@{g[0]}[1]'    PASS    FAIL
+    ...    ELSE IF    '@{e[0]}[1]'=='B6804'    Set Variable If    '@{c[0]}[3]'=='@{e[0]}[3]'    PASS    FAIL
+    ...    ELSE    Set Variable    FAIL
+    ${result9}    Set Variable If    '@{c[0]}[4]'=='@{h[0]}[0]'    PASS    FAIL
+    ${result10}    Set Variable If    '@{c[0]}[5]'=='@{h[0]}[1]'    PASS    FAIL
+    #结果
+    @{resultA}    Create List    @{a[0]}[0]    ${result1}    @{a[0]}[1]    ${result2}    ${n[${j}]}
+    ...    @{d[0]}[0]    ${result21}    @{b[0]}[0]    ${result3}    @{b[0]}[1]    ${result4}
+    @{resultB}    Create List    @{resultA}    @{c[0]}[0]    ${result5}    @{c[0]}[1]    ${n[${j}]}
+    ...    ${result6}    @{c[0]}[2]    ${result7}    @{c[0]}[3]    ${result8}
+    @{result}    Create List    @{resultB}    @{c[0]}[4]    ${result9}    @{c[0]}[5]    ${result10}
+    [Return]    @{result}
+
+信审综审判断
+    [Arguments]    ${loan_db}    ${APPID}    ${password}=123!@#qwe
+    @{app_status}    Query    SELECT app_status FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'
+    @{ASSIGNEE_ID}    Query    SELECT ASSIGNEE_ID FROM ${loan_db}.t_lon_application_record WHERE APP_ID='${APPID}' AND STATUS='F0206'
+    ${result}    Run Keyword If    '@{app_status[0]}[0]'=='F0206'    Run Keyword And Continue On Failure    信审综合审批    @{ASSIGNEE_ID[0]}[0]    ${password}
+    ...    ${APPID}
+    ...    ELSE    Set Variable    wu
+    Run Keyword If    '@{app_status[0]}[0]'=='F0206'    Close Browser
+    [Return]    ${result}
+
+信审综合审批
+    [Arguments]    ${username}    ${password}    ${APPID}
+    登录    ${username}    ${password}
+    Select Frame    name=fraLeft
+    Click Element    id=span470    #点击贷前管理(新)
+    Click Element    id=span470020    #点击审批管理
+    Unselect Frame
+    sleep    3
+    Select Frame    id=fraMain
+    sleep    2
+    Clear Element Text    name=appId
+    Input Text    name=appId    ${APPID}    #输入工单号
+    Click Button    id=btnListQuery    #点击查询
+    sleep    2
+    Click Button    id=btn21    #点击开始审批按钮
+    Wait Until Page Contains Element    css=.layout-button-right    10    页面元素没有出现    #等待页面元素出现
+    Click Element    css=.layout-button-right    #点右箭头关闭附件
+    Sleep    2
+    : FOR    ${i}    IN RANGE    1    30    2
+    \    ${message}    Get Text    xpath=//*[@id="checktabs"]/div[1]/div[3]/ul/li[${i}]/a    #获取标签名称
+    \    Run Keyword If    '${message}'=='贷款信息'    贷款信息    ${i}
+    \    Run Keyword If    '${message}'=='企网信息查询'    企网信息查询    ${i}
+    \    Run Keyword If    '${message}'=='征信报告'    征信报告    ${i}
+    \    Run Keyword If    '${message}'=='电话核查'    电话核查    ${i}
+    \    Run Keyword If    '${message}'=='91征信'    91征信    ${i}
+    \    Run Keyword If    '${message}'=='宜信借款客户查询'    宜信借款客户查询    ${i}
+    \    Exit For Loop If    '${message}'=='综合审批放贷建议'
+    \    ${message1}    Get Text    xpath=//*[@id="checktabs"]/div[1]/div[3]/ul/li[${i+1}]/a
+    \    ${number}    Evaluate    ${i}+1
+    \    Run Keyword If    '${message1}'=='贷款信息'    贷款信息    ${number}
+    \    Run Keyword If    '${message1}'=='企网信息查询'    企网信息查询    ${number}
+    \    Run Keyword If    '${message1}'=='征信报告'    征信报告    ${number}
+    \    Run Keyword If    '${message1}'=='电话核查'    电话核查    ${number}
+    \    Run Keyword If    '${message1}'=='91征信'    91征信    ${number}
+    \    Run Keyword If    '${message1}'=='宜信借款客户查询'    宜信借款客户查询    ${number}
+    \    Exit For Loop If    '${message1}'=='综合审批放贷建议'
+    \    Wait Until Page Contains Element    css=.tabs-scroller-right    10    页面元素没有出现    #等待页面元素出现
+    \    Click Element    css=.tabs-scroller-right
+    \    Sleep    2
+    \    ${Not_Contain}    Run Keyword And Return Status    Page Should Not Contain Element    xpath=/html/body/div[8]/div[2]/div[3]/a
+    \    Run Keyword If    '${Not_Contain}'=='False'    Click Element    css=.l-btn
+    \    ...    ELSE    No Operation
+    \    Sleep    2
+    ${last_number}    Set Variable If    '${message}'=='综合审批放贷建议'    ${i}    ${number}
+    ${message}    综合审批放贷建议    ${last_number}
+    Unselect Frame
+    ${result}    Run Keyword And Return Status    Should Contain    ${message}    综合审批成功
+    sleep    2
+    [Return]    ${result}
+
+信审审批判断
+    [Arguments]    ${loan_db}    ${APPID}    ${password}=123!@#qwe
+    @{app_status}    Query    SELECT app_status FROM ${loan_db}.t_lon_application WHERE APP_ID='${APPID}'
+    @{ASSIGNEE_ID}    Query    SELECT ASSIGNEE_ID FROM ${loan_db}.t_lon_application_record WHERE APP_ID='${APPID}' AND STATUS='F0210'
+    Run Keyword If    '@{app_status[0]}[0]'=='F0210'    信审审批    @{ASSIGNEE_ID[0]}[0]    ${password}    ${APPID}
+    ...    ELSE    No Operation
+
+信审审批
+    [Arguments]    ${username}    ${password}    ${APPID}
+    登录    ${username}    ${password}
+    Select Frame    name=fraLeft
+    Click Element    id=span470    #点击贷前管理(新)
+    Click Element    id=span470020    #点击审批管理
+    Unselect Frame
+    sleep    3
+    Select Frame    id=fraMain
+    Input Text    name=appId    ${APPID}    #输入工单号
+    Click Button    id=btnListQuery    #点击查询
+    sleep    2
+    Click Button    id=btn21    #点击开始审批按钮
+    Wait Until Page Contains Element    css=.layout-button-right    10    页面元素没有出现    #等待页面元素出现
+    Click Element    css=.layout-button-right    #点右箭头关闭附件
+    Sleep    2
+    : FOR    ${i}    IN RANGE    10    30
+    \    ${message}    Get Text    xpath=//*[@id="checktabs"]/div[1]/div[3]/ul/li[${i}]/a    #获取标签名称
+    \    Exit For Loop If    '${message}'=='审批放贷建议'
+    \    Wait Until Page Contains Element    css=.tabs-scroller-right    10    页面元素没有出现    #等待页面元素出现
+    \    Click Element    css=.tabs-scroller-right    #点击页面的右箭头
+    ${message}    审批放贷建议    ${i}
+    Unselect Frame
+    Close Browser
+    Should Contain    ${message}    成功
+
+贷款信息
+    [Arguments]    ${i}
+    Click Element    xpath=//*[@id="checktabs"]/div[1]/div[3]/ul/li[${i}]/a
+    Sleep    2
+    #    新客户F4101    续贷客户F4102
+    Select Radio Button    customerType    F4101    #选择客户类型
+    #    受薪客户F2501    私营业主F2502
+    ${customerProperty}    Set Variable    F2501
+    Select Radio Button    customerProperty    ${customerProperty}    #选择客户性质
+    #    是N8701    否N8702    是否国企事业单位
+    #    Select Radio Button    firmType    N8701
+    #    有F2401    无F2402    是否有营业执照
+    #    Select Radio Button    haveLicense    F2401
+    Run Keyword If    '${customerProperty}'=='F2501'    Select Radio Button    firmType    N8701
+    ...    ELSE    Select Radio Button    haveLicense    F2401
+
+企网信息查询
+    [Arguments]    ${i}
+    Click Element    xpath=//*[@id="checktabs"]/div[1]/div[3]/ul/li[${i}]/a    #点击标签栏
+    Wait Until Page Contains Element    css=.tabs-panels > div:nth-child(${i}) > div:nth-child(1) > div:nth-child(2) > div:nth-child(1) > div:nth-child(1) > ul:nth-child(1) > li:nth-child(1) > input:nth-child(1)    10    页面元素没有出现    #等待页面元素出现
+    Click Element    css=.tabs-panels > div:nth-child(${i}) > div:nth-child(1) > div:nth-child(2) > div:nth-child(1) > div:nth-child(1) > ul:nth-child(1) > li:nth-child(1) > input:nth-child(1)    #点击查询
+    Wait Until Page Contains Element    xpath=/html/body/div[8]/div[2]/div[3]/a    10    页面元素没有出现    #等待页面元素出现
+    Click Element    xpath=/html/body/div[8]/div[2]/div[3]/a    #点击确定
+
+征信报告
+    [Arguments]    ${i}
+    Click Element    xpath=//*[@id="checktabs"]/div[1]/div[3]/ul/li[${i}]/a
+    Sleep    2
+    Clear Element Text    id=creditCardLimitAmt
+    Input Text    id=creditCardLimitAmt    1    #填写授信总额
+    Clear Element Text    id=cardMaxLimitAmt
+    Input Text    id=cardMaxLimitAmt    1    #最高授信额度
+    Clear Element Text    id=last6CreditNum
+    Input Text    id=last6CreditNum    1    #近半年查询次数
+    Clear Element Text    id=selfQuery
+    Input Text    id=selfQuery    1    #半年本人查询次数
+    Clear Element Text    id=longestYear
+    Input Text    id=longestYear    1    #信用卡最长用年限
+    Clear Element Text    id=creditCardSumLimitAmt
+    Input Text    id=creditCardSumLimitAmt    1    #总使用额度
+    Clear Element Text    id=creditCardNum
+    Input Text    id=creditCardNum    1    #现在使用张数
+    Clear Element Text    id=last6Credit
+    Input Text    id=last6Credit    1    #过去六个月增数
+    Clear Element Text    id=maxExceedTime
+    Input Text    id=maxExceedTime    0    #过去一年最高逾期数
+    Clear Element Text    id=last2Day
+    Input Text    id=last2Day    0    #2次以上逾期时间
+    Clear Element Text    id=year2Last2Num
+    Input Text    id=year2Last2Num    0    #近2年2以上逾期数
+    Clear Element Text    id=creditLoanSumAmt
+    Input Text    id=creditLoanSumAmt    1    #信用贷款总额
+    Clear Element Text    id=creditMonthRepayAmt
+    Input Text    id=creditMonthRepayAmt    1    #月还款
+    Clear Element Text    id=creditRemainAmt
+    Input Text    id=creditRemainAmt    0    #剩余贷款金额
+    Clear Element Text    id=creditListSumAmt
+    Input Text    id=creditListSumAmt    1    #流水小贷月总额
+    Clear Element Text    id=creditLoansNum
+    Input Text    id=creditLoansNum    1    #信用类贷款总笔数
+    Clear Element Text    id=carLonAmt
+    Input Text    id=carLonAmt    1    #车贷金额
+    Clear Element Text    id=carMonthRepayAmt
+    Input Text    id=carMonthRepayAmt    1    #月还款
+    Clear Element Text    id=carRemainAmt
+    Input Text    id=carRemainAmt    0    #剩余贷款金额
+    Clear Element Text    id=carLonSum
+    Input Text    id=carLonSum    1    #笔数
+    Clear Element Text    id=houseLonAmt
+    Input Text    id=houseLonAmt    1    #房贷金额
+    Clear Element Text    id=houseMonthRepayAmt
+    Input Text    id=houseMonthRepayAmt    1    #月还款
+    Clear Element Text    id=houseRemainAmt
+    Input Text    id=houseRemainAmt    0    #剩余贷款金额
+    Clear Element Text    id=houseNum
+    Input Text    id=houseNum    1    #笔数
+    Clear Element Text    id=creditLoanSumAmtOther
+    Input Text    id=creditLoanSumAmtOther    1    #其他抵押担保贷款总额
+    Clear Element Text    id=creditMonthRepayAmtOther
+    Input Text    id=creditMonthRepayAmtOther    1    #月还款额
+    Clear Element Text    id=creditRemainAmtOther
+    Input Text    id=creditRemainAmtOther    0    #剩余贷款金额
+    Clear Element Text    id=creditLoansNumOther
+    Input Text    id=creditLoansNumOther    1    #其他抵押担保贷款总笔数
+    Clear Element Text    id=checkMonthIncomeAmt
+    Input Text    id=checkMonthIncomeAmt    25000    #核实月收入
+    Click Button    name=but    #点击计算
+    Select Radio Button    creditVersion    1    #征信报告格式
+    sleep    2
+    Clear Element Text    id=last3List0
+    Input Text    id=last3List0    18000    #近六个月打卡工资
+    Clear Element Text    id=last3List1
+    Input Text    id=last3List1    20000
+    Clear Element Text    id=last3List2
+    Input Text    id=last3List2    20000
+    Clear Element Text    id=last3List3
+    Input Text    id=last3List3    20000
+    Clear Element Text    id=last3List4
+    Input Text    id=last3List4    20000
+    Clear Element Text    id=last3List5
+    Input Text    id=last3List5    20000
+    Select Radio Button    jobProve    F2401    #工作证明
+    Select Checkbox    id=industryRegist    #在工商有登记
+
+电话核查
+    [Arguments]    ${i}
+    Click Element    xpath=//*[@id="checktabs"]/div[1]/div[3]/ul/li[${i}]/a
+    Wait Until Page Contains Element    id=customerRemark    10    页面元素没有出现    #等待页面元素出现
+    Clear Element Text    id=customerRemark
+    Input Text    id=customerRemark    已核查，号码正确    #个人电话
+    Clear Element Text    css=div.panel:nth-child(${i}) > div:nth-child(1) > table:nth-child(2) > tbody:nth-child(3) > tr:nth-child(1) > td:nth-child(5) > textarea:nth-child(3)
+    Input Text    css=div.panel:nth-child(${i}) > div:nth-child(1) > table:nth-child(2) > tbody:nth-child(3) > tr:nth-child(1) > td:nth-child(5) > textarea:nth-child(3)    已核查，号码正确    #公司电话
+    Clear Element Text    css=#phoneModel > td:nth-child(5) > textarea:nth-child(3)
+    Input Text    css=#phoneModel > td:nth-child(5) > textarea:nth-child(3)    已核查，号码正确    #其他电话
+
+91征信
+    [Arguments]    ${i}
+    Click Element    xpath=//*[@id="checktabs"]/div[1]/div[3]/ul/li[${i}]/a
+    Wait Until Page Contains Element    css=div.panel:nth-child(${i}) > div:nth-child(1) > div:nth-child(1) > div:nth-child(1) > div:nth-child(1) > ul:nth-child(1) > li:nth-child(1) > input:nth-child(1)    10    页面元素没有出现    #等待页面元素出现
+    Click Button    css=div.panel:nth-child(${i}) > div:nth-child(1) > div:nth-child(1) > div:nth-child(1) > div:nth-child(1) > ul:nth-child(1) > li:nth-child(1) > input:nth-child(1)    #点击征信查询
+    sleep    7    #5秒后才显示结果
+    Click Element    css=.l-btn    #点击确定按钮
+
+宜信借款客户查询
+    [Arguments]    ${i}
+    Click Element    xpath=//*[@id="checktabs"]/div[1]/div[3]/ul/li[${i}]/a    #点击标签
+    Sleep    3
+    ${Not_Contain}    Run Keyword And Return Status    Page Should Not Contain Element    xpath=/html/body/div[8]/div[2]/div[3]/a
+    log    ${Not_Contain}
+    Run Keyword If    '${Not_Contain}'=='True'    宜信页面查询操作    ${i}
+    ...    ELSE    Click Element    css=.l-btn
+    Sleep    2
+    #Run Keyword If    '${Not_Contain}'=='False'    Click Element    css=.l-btn
+
+宜信页面查询操作
+    [Arguments]    ${i}
+    Wait Until Page Contains Element    css=div.panel:nth-child(${i}) > div:nth-child(1) > div:nth-child(1) > div:nth-child(1) > div:nth-child(1) > ul:nth-child(1) > li:nth-child(1) > input:nth-child(1)    10    页面元素没有出现    #等待页面元素出现
+    Click Element    css=div.panel:nth-child(${i}) > div:nth-child(1) > div:nth-child(1) > div:nth-child(1) > div:nth-child(1) > ul:nth-child(1) > li:nth-child(1) > input:nth-child(1)    #点击查询
+    Wait Until Page Contains Element    css=.l-btn    10    页面元素没有出现    #等待页面元素出现
+    Click Element    css=.l-btn    #点击确定
+
+综合审批放贷建议
+    [Arguments]    ${i}
+    Click Element    xpath=//*[@id="checktabs"]/div[1]/div[3]/ul/li[${i}]/a
+    Wait Until Page Contains Element    css=div.panel:nth-child(${i}) > div:nth-child(1) > div:nth-child(2) > div:nth-child(1) > ul:nth-child(1) > li:nth-child(2) > input:nth-child(1)    10    页面元素没有出现    #等待页面元素出现
+    Select Radio Button    applicationProcess.colligateSuggest    F1401
+    Click Element    css=div.panel:nth-child(${i}) > div:nth-child(1) > div:nth-child(2) > div:nth-child(1) > ul:nth-child(1) > li:nth-child(2) > input:nth-child(1)    #点击提交按钮
+    Wait Until Page Contains Element    xpath=/html/body/div[8]/div[2]/div[4]/a[1]    10    页面元素没有出现    #等待页面元素出现
+    #    点击确认框中的确定
+    Click Element    xpath=/html/body/div[8]/div[2]/div[4]/a[1]
+    Sleep    7
+    Wait Until Page Contains Element    xpath=/html/body/div[8]/div[2]/div[4]/a    10    页面元素没有出现    #等待页面元素出现
+    Wait Until Page Contains Element    xpath=/html/body/div[8]/div[2]/div[2]    10    页面元素没有出现    #等待页面元素出现
+    ${message}    Get Text    xpath=/html/body/div[8]/div[2]/div[2]
+    Click Element    xpath=/html/body/div[8]/div[2]/div[4]/a    #点击确定
+    [Return]    ${message}
+
+审批放贷建议
+    [Arguments]    ${i}
+    Click Element    xpath=//*[@id="checktabs"]/div[1]/div[3]/ul/li[${i}]/a
+    Wait Until Page Contains Element    css=div.panel:nth-child(${i}) > div:nth-child(1) > table:nth-child(1) > thead:nth-child(2) > tr:nth-child(1) > td:nth-child(1)    10    页面元素没有出现    #等待页面元素出现
+    Select Radio Button    applicationProcess.approveSuggest    F1401
+    Comment    点击提交
+    Click Element    css=div.panel:nth-child(${i}) > div:nth-child(1) > div:nth-child(2) > div:nth-child(1) > ul:nth-child(1) > li:nth-child(2) > input:nth-child(1)
+    Wait Until Page Contains Element    css=a.l-btn:nth-child(1)    10    页面元素没有出现    #等待页面元素出现
+    Comment    点击确认框中的确定
+    Click Element    css=a.l-btn:nth-child(1)
+    Wait Until Page Contains Element    css=.l-btn    10    页面元素没有出现    #等待页面元素出现
+    Wait Until Page Contains Element    css=.messager-body > div:nth-child(2)    10    页面元素没有出现    #等待页面元素出现
+    ${message}    Get Text    css=.messager-body > div:nth-child(2)    #获取结果信息
+    Click Element    css=.l-btn    #点击确定
+    [Return]    ${message}
+
+工单提交
+    [Arguments]    ${appId}
+    ${dicttype}    Create Dictionary    Content-Type=application/x-www-form-urlencoded
+    Create Session    api    ${ip}
+    ${addr}    Post Request    api    /httpservice/xinyiloan/record/updateStatus.intf    data=${appId}    headers=${dicttype}
+    log    ${addr.text}
+    Should Be Equal As Strings    ${addr.status_code}    200
+    Should Be Equal As Strings    ${addr.json()['resp_code']}    0000
+    Delete All Sessions
+
+保理审核
+    [Arguments]    ${username}    ${password}    ${APPID}
+    登录    ${username}    ${password}
+    Select Frame    name=fraLeft
+    Click Element    id=span521    #点击贷中管理（新）
+    Click Element    id=span521034    #点击放款管理（保理）
+    Unselect Frame
+    sleep    3
+    Select Frame    id=fraMain
+    : FOR    ${i}    IN RANGE    1    16
+    \    ${JF_jobnumber}    Get Text    xpath=//*[@id="tblResultOfSglTbl"]/tbody/tr[${i}]/td[17]
+    \    Exit For Loop If    '${JF_jobnumber}'=='${APPID}'
+    Select Checkbox    xpath=//*[@id="tblResultOfSglTbl"]/tbody/tr[${i}]/td[1]/input    #勾选工单
+    Click Button    id=loan    #点击确认放款
+    sleep    3
+    Select Frame    id=iframe_date
+    ${nowtime}    Get Time    #获取当前时间
+    Clear Element Text    id=loanSFM
+    Input Text    id=loanSFM    ${nowtime}    #填写放款时间
+    Click Button    id=pointDate    #点击提交
+    sleep    3
+    Unselect Frame
+    Close Browser
+    @{app_status}    Query    SELECT app_status FROM sit_loan_db.t_lon_application WHERE APP_ID='${APPID}'
+    Should Be Equal As Strings    @{app_status[0]}[0]    F0230

@@ -1,0 +1,89 @@
+*** Keywords ***
+测试环境
+    #页面和接口地址
+    ${loginURL}    set variable    http://47.94.40.127:7000/product/system/login!selectPage.action    #web页面地址
+    ${UserCenterURL}    set variable    http://101.200.87.116:9190    #web页面用户中心
+    ${BROWSER}    set variable    googlechrome    #设置浏览器
+    ${RecordLoanURL}    set variable    http://47.94.40.127:7084/webservice/loanService?wsdl    #进件接口地址
+    ${url}    set variable    http://47.94.40.127:7082    #提现回盘接口
+    ${ip}    set variable    http://47.94.40.127:7083    #合同接口地址
+    ${dainziqianzhang}    set variable    http://47.94.191.238:7086    #电子签章地址
+    #web帐号
+    ${web_user}    set variable    systemwzh
+    ${web_password}    set variable    bus2017..
+    #SSH配置信息
+    ${ssh_host}    set variable    47.94.40.127
+    ${ssh_name}    set variable    appuser
+    ${ssh_psw}    set variable    5zt4BRJ8
+    ${rds_addr}    set variable    rdsiuzzzqiuzzzq.mysql.rds.aliyuncs.com
+    #数据库配置信息
+    ${mysql_usr}    set variable    sit_user01
+    ${mysql_psw}    set variable    j*IHNifVbxCJ
+    ${mysql_port}    set variable    3306
+    #设置数据库信息
+    set suite variable    ${loan_db}    test_loan_db
+    set suite variable    ${base_db}    test_base_db
+    #创建配置信息字典
+    ${Envir_Config}    Create Dictionary    UserCenterURL=${UserCenterURL}    BROWSER=${BROWSER}    loginURL=${loginURL}    RecordLoanURL=${RecordLoanURL}    url=${url}
+    ...    ssh_host=${ssh_host}    ssh_usr=${ssh_name}    ssh_psw=${ssh_psw}    sql_addr=${rds_addr}    sql_usr=${mysql_usr}    sql_psw=${mysql_psw}
+    ...    sql_port=${mysql_port}    web_user=${web_user}    web_password=${web_password}    ip=${ip}    dainziqianzhang=${dainziqianzhang}    loan_db=${loan_db}
+    ...    base_db=${base_db}
+    [Return]    ${Envir_Config}
+
+准生产环境
+    #页面和接口地址
+    ${loginURL}    set variable    http://123.57.48.237:7000/product/system/login!selectPage.action    #web页面地址
+    ${UserCenterURL}    set variable    http://101.200.87.116:9190    #web页面用户中心
+    ${BROWSER}    set variable    googlechrome    #设置浏览器
+    ${RecordLoanURL}    set variable    http://123.57.48.237:7082/webservice/loanService?wsdl    #进件接口地址
+    ${url}    set variable    http://182.92.26.27:8082    #提现回盘接口
+    ${ip}    set variable    http://123.57.48.237:7082    #合同接口地址
+    ${dainziqianzhang}    set variable    http://182.92.108.185:7009    #电子签章地址
+    #web帐号
+    ${web_user}    set variable    systemwpf
+    ${web_password}    set variable    123!@#qwer
+    #SSH配置信息
+    ${ssh_host}    set variable    123.57.48.237
+    ${ssh_name}    set variable    read
+    ${ssh_psw}    set variable    jFF111    \    ssh_name=${ssh_name}    ssh_psw=${ssh_psw}    rds_addr=${rds_addr}
+    ...    mysql_db=${mysql_db}    mysql_usr=${mysql_usr}    mysql_psw=${mysql_psw}
+    ${rds_addr}    set variable    rdsiuzzzqiuzzzq.mysql.rds.aliyuncs.com
+    #数据库配置信息
+    ${mysql_usr}    set variable    sit_user01
+    ${mysql_psw}    set variable    j*IHNifVbxCJ
+    ${mysql_port}    set variable    3306
+    #设置数据库信息
+    set suite variable    ${loan_db}    sit_loan_db
+    set suite variable    ${base_db}    sit_base_db
+    [Return]    ${Envir_Config}
+
+联调环境
+    #页面和接口地址
+    ${loginURL}    set variable    http://123.57.48.237:7000/product/system/login!selectPage.action    #web页面地址
+    ${UserCenterURL}    set variable    http://101.200.87.116:9190    #web页面用户中心
+    ${BROWSER}    set variable    googlechrome    #设置浏览器
+    ${RecordLoanURL}    set variable    http://123.57.48.237:7082/webservice/loanService?wsdl    #进件接口地址
+    ${url}    set variable    http://182.92.108.185:7009    #提现回盘接口
+    ${ip}    set variable    http://123.57.48.237:7082    #合同接口地址
+    ${dainziqianzhang}    set variable    http://182.92.108.185:7009    #电子签章地址
+    #web帐号
+    ${web_user}    set variable    systemwpf
+    ${web_password}    set variable    123!@#qwer
+    #SSH配置信息
+    ${ssh_host}    set variable    123.57.48.237
+    ${ssh_name}    set variable    read
+    ${ssh_psw}    set variable    jFF111
+    ${rds_addr}    set variable    rdsiuzzzqiuzzzq.mysql.rds.aliyuncs.com
+    #数据库配置信息
+    ${mysql_usr}    set variable    sit_user01
+    ${mysql_psw}    set variable    j*IHNifVbxCJ
+    ${mysql_port}    set variable    3306
+    #设置数据库信息
+    set suite variable    ${loan_db}    sit_loan_db
+    set suite variable    ${base_db}    sit_base_db
+    #创建配置信息字典
+    ${Envir_Config}    Create Dictionary    UserCenterURL=${UserCenterURL}    BROWSER=${BROWSER}    loginURL=${loginURL}    RecordLoanURL=${RecordLoanURL}    url=${url}
+    ...    ssh_host=${ssh_host}    ssh_usr=${ssh_name}    ssh_psw=${ssh_psw}    sql_addr=${rds_addr}    sql_usr=${mysql_usr}    sql_psw=${mysql_psw}
+    ...    sql_port=${mysql_port}    web_user=${web_user}    web_password=${web_password}    ip=${ip}    dainziqianzhang=${dainziqianzhang}    loan_db=${loan_db}
+    ...    base_db=${base_db}
+    [Return]    ${Envir_Config}
